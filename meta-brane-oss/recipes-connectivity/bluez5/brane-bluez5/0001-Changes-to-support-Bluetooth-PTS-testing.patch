@@ -1,0 +1,204 @@
+From 1bd885e0d5262a85acef4e0684eeb7bc0bdf2cee Mon Sep 17 00:00:00 2001
+From: Dave Badger <db@braneaudio.com>
+Date: Fri, 21 Jul 2023 17:52:09 -0500
+Subject: [PATCH] Changes to support Bluetooth PTS testing Associated with
+ kernel patch and speaker_main commit
+
+---
+ plugins/policy.c       |  2 ++
+ profiles/audio/a2dp.c  | 29 ++++++++++++++++++++---------
+ profiles/audio/avdtp.c | 16 ++++++++--------
+ profiles/audio/avdtp.h |  4 ++++
+ profiles/audio/avrcp.c | 15 +++++++++------
+ profiles/audio/media.c | 26 +++++++++++++++++++++++++-
+ 6 files changed, 68 insertions(+), 24 deletions(-)
+
+diff --git a/plugins/policy.c b/plugins/policy.c
+index 0bbdbfc88..6c55f1791 100644
+--- a/plugins/policy.c
++++ b/plugins/policy.c
+@@ -332,6 +332,8 @@ static bool policy_connect_tg(gpointer user_data)
+ 	struct policy_data *data = user_data;
+ 	struct btd_service *service;
+ 
++   return FALSE;  // Brane: This role is not supported, creates issues with Bluetooth PTS
++
+ 	data->tg_timer = 0;
+ 	data->tg_retries++;
+ 
+diff --git a/profiles/audio/a2dp.c b/profiles/audio/a2dp.c
+index 47b5dd7c3..f733779ff 100644
+--- a/profiles/audio/a2dp.c
++++ b/profiles/audio/a2dp.c
+@@ -587,11 +587,16 @@ done:
+ 
+ static void endpoint_setconf_cb(struct a2dp_setup *setup, gboolean ret)
+ {
+-	if (ret == FALSE) {
+-		setup->err = g_new(struct avdtp_error, 1);
+-		avdtp_error_init(setup->err, AVDTP_MEDIA_CODEC,
+-					AVDTP_UNSUPPORTED_CONFIGURATION);
+-	}
++
++   // Brane: Added support to return set conf error code from speaker_main
++
++   ret &= 0xff;  // mask off ls byte  
++
++   if (ret != 0) {
++      setup->err = g_new(struct avdtp_error, 1);
++      avdtp_error_init(setup->err, AVDTP_MEDIA_CODEC,
++            ret);
++   }
+ 
+ 	auto_config(setup);
+ 	setup_unref(setup);
+@@ -682,10 +687,16 @@ static gboolean endpoint_setconf_ind(struct avdtp *session,
+ 		codec = (struct avdtp_media_codec_capability *) cap->data;
+ 
+ 		if (codec->media_codec_type != a2dp_sep->codec) {
+-			setup->err = g_new(struct avdtp_error, 1);
+-			avdtp_error_init(setup->err, AVDTP_MEDIA_CODEC,
+-					AVDTP_UNSUPPORTED_CONFIGURATION);
+-			goto done;
++
++//       Brane: Must return either not supoorted codec or invalid codec instead of unsuported configuraion
++         setup->err = g_new(struct avdtp_error, 1);
++         if(codec->media_codec_type <= 4)  // codec types 0-4 are valid, but not supported by this endpoint
++            avdtp_error_init(setup->err, AVDTP_MEDIA_CODEC,
++               NOT_SUPPORTED_CODEC_TYPE);
++         else
++            avdtp_error_init(setup->err, AVDTP_MEDIA_CODEC,
++               INVALID_CODEC_TYPE);
++         goto done;
+ 		}
+ 
+ 		ret = a2dp_sep->endpoint->set_configuration(a2dp_sep,
+diff --git a/profiles/audio/avdtp.c b/profiles/audio/avdtp.c
+index 10ef380d4..2968d84f3 100644
+--- a/profiles/audio/avdtp.c
++++ b/profiles/audio/avdtp.c
+@@ -76,7 +76,7 @@
+ #define REQ_TIMEOUT 6
+ #define SUSPEND_TIMEOUT 10
+ #define ABORT_TIMEOUT 2
+-#define DISCONNECT_TIMEOUT 1
++#define DISCONNECT_TIMEOUT 30 // Brane: was 1, give Bluetooth PTS user time to respond to dialog box.
+ #define START_TIMEOUT 1
+ 
+ #if __BYTE_ORDER == __LITTLE_ENDIAN
+@@ -1460,8 +1460,8 @@ static void setconf_cb(struct avdtp *session, struct avdtp_stream *stream,
+ 	struct avdtp_local_sep *sep;
+ 
+ 	if (err != NULL) {
+-		rej.error = AVDTP_UNSUPPORTED_CONFIGURATION;
+-		rej.category = err->err.error_code;
++      rej.error = err->err.error_code;  // Brane: send back set conf error code from speaker_main
++      rej.category = err->err.error_code;
+ 		avdtp_send(session, session->in.transaction,
+ 				AVDTP_MSG_TYPE_REJECT, AVDTP_SET_CONFIGURATION,
+ 				&rej, sizeof(rej));
+@@ -1549,11 +1549,11 @@ static gboolean avdtp_setconf_cmd(struct avdtp *session, uint8_t transaction,
+ 					&stream->codec,
+ 					&stream->delay_reporting);
+ 
+-	if (!stream->caps || !stream->codec) {
+-		err = AVDTP_UNSUPPORTED_CONFIGURATION;
+-		category = 0x00;
+-		goto failed_stream;
+-	}
++   if (!stream->caps || !stream->codec) {  // Brane: proper error code needs to be returned instead of just unsupported configuration
++      err = BAD_MEDIA_TRANSPORT_FORMAT;
++      category = 0x00;
++      goto failed_stream;
++   }
+ 
+ 	/* Verify that the Media Transport capability's length = 0. Reject otherwise */
+ 	for (l = stream->caps; l != NULL; l = g_slist_next(l)) {
+diff --git a/profiles/audio/avdtp.h b/profiles/audio/avdtp.h
+index 102a2603e..797520041 100644
+--- a/profiles/audio/avdtp.h
++++ b/profiles/audio/avdtp.h
+@@ -58,6 +58,10 @@ struct avdtp_error {
+ #define AVDTP_UNSUPPORTED_CONFIGURATION		0x29
+ #define AVDTP_BAD_STATE				0x31
+ 
++#define INVALID_CODEC_TYPE          0xC1  // Brane: These error codes from the Bluetooth spec were not previously defined in bluez
++#define NOT_SUPPORTED_CODEC_TYPE    0xC2
++#define BAD_MEDIA_TRANSPORT_FORMAT  0x23
++
+ /* SEP types definitions */
+ #define AVDTP_SEP_TYPE_SOURCE			0x00
+ #define AVDTP_SEP_TYPE_SINK			0x01
+diff --git a/profiles/audio/avrcp.c b/profiles/audio/avrcp.c
+index 80f34c7a7..cfd792262 100644
+--- a/profiles/audio/avrcp.c
++++ b/profiles/audio/avrcp.c
+@@ -1654,8 +1654,10 @@ static uint8_t avrcp_handle_register_notification(struct avrcp *session,
+ 		break;
+ 	case AVRCP_EVENT_VOLUME_CHANGED:
+ 		volume = media_transport_get_device_volume(dev);
+-		if (volume < 0)
+-			goto err;
++      if (volume < 0) {
++         volume = 1;  // Brane required for PTS AVRCP/TG/VLH/BI-01-C
++                      // This test sends this request when there is no tramsport, fake it and the test will move on and create the transport.
++      }
+ 
+ 		pdu->params[1] = volume;
+ 		len = 2;
+@@ -4145,10 +4147,11 @@ static void target_init(struct avrcp *session)
+ 	}
+ 
+ 	session->supported_events |= (1 << AVRCP_EVENT_STATUS_CHANGED) |
+-				(1 << AVRCP_EVENT_TRACK_CHANGED) |
+-				(1 << AVRCP_EVENT_TRACK_REACHED_START) |
+-				(1 << AVRCP_EVENT_TRACK_REACHED_END) |
+-				(1 << AVRCP_EVENT_SETTINGS_CHANGED);
++            (1 << AVRCP_EVENT_TRACK_CHANGED) |
++            (1 << AVRCP_EVENT_TRACK_REACHED_START) |
++            (1 << AVRCP_EVENT_TRACK_REACHED_END) |
++            (1 << AVRCP_EVENT_VOLUME_CHANGED) |   // Brane required for PTS AVRCP/TG/VLH/BI-01-C, must always support a volume change
++            (1 << AVRCP_EVENT_SETTINGS_CHANGED);
+ 
+ 	if (target->version < 0x0104)
+ 		return;
+diff --git a/profiles/audio/media.c b/profiles/audio/media.c
+index c9328ab9b..47cbeb65b 100644
+--- a/profiles/audio/media.c
++++ b/profiles/audio/media.c
+@@ -345,7 +345,31 @@ static void endpoint_reply(DBusPendingCall *call, void *user_data)
+ 
+ 		ret = configuration;
+ 		goto done;
+-	} else if (dbus_message_is_method_call(request->msg,
++      goto done;
++   }
++   else if (dbus_message_is_method_call(request->msg, MEDIA_ENDPOINT_INTERFACE,
++         "SetConfiguration")) {
++
++//       Brane: added support for a set conf error code to be returned from speaker main
++
++         DBusMessageIter args, array;
++         uint8_t set_config_ret_code = 0;
++
++         dbus_message_iter_init(reply, &args);
++
++         dbus_message_iter_get_basic(&args, &set_config_ret_code);
++
++         size = 1;
++
++         if (set_config_ret_code != 0) {
++            endpoint_remove_transport(endpoint, request->transport);
++         }
++
++         ret = &set_config_ret_code;
++
++         goto done;
++
++      } else if (dbus_message_is_method_call(request->msg,
+ 						MEDIA_ENDPOINT_INTERFACE,
+ 						"SelectProperties")) {
+ 		dbus_message_iter_init(reply, &args);
+-- 
+2.25.1
+

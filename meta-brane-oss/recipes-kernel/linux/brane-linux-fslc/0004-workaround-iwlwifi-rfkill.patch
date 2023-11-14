@@ -1,0 +1,29 @@
+From eeba04e7279a77bcb6b340a3d6a4288d259b3cf5 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Mon, 6 Nov 2023 11:38:45 -0600
+Subject: [PATCH] workaround iwlwifi rfkill
+
+The hardware rfkill is stuck on with this kernel.  This patch bypasses
+checks to this status to allow the driver to load and operate.  As far
+as I know our hardware cannot get stuck in this state (e.g. we don't
+have a literal on/off switch for powering the wifi card) so this bypass
+ought to be okay.
+---
+ drivers/net/wireless/intel/iwlwifi/pcie/internal.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/net/wireless/intel/iwlwifi/pcie/internal.h b/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+index f7e4f868363d..9ec90d4baa5c 100644
+--- a/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
++++ b/drivers/net/wireless/intel/iwlwifi/pcie/internal.h
+@@ -755,6 +755,7 @@ static inline bool iwl_is_rfkill_set(struct iwl_trans *trans)
+ 	if (trans_pcie->debug_rfkill == 1)
+ 		return true;
+ 
++return false; // BRANE: returns true after power-up, doesn't clear.
+ 	return !(iwl_read32(trans, CSR_GP_CNTRL) &
+ 		CSR_GP_CNTRL_REG_FLAG_HW_RF_KILL_SW);
+ }
+-- 
+2.34.1
+

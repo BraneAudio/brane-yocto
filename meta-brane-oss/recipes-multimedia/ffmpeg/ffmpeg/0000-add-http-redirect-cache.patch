@@ -1,0 +1,136 @@
+From 100759fe69eab5477c1ec41295d4cb39db9aff91 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Wed, 8 Mar 2023 11:14:18 -0600
+Subject: [PATCH] add http redirect cache
+
+It is possible to get hls playlists whose contents are redirected.  When this happens ffmpeg is closing and opening at least two urls every segment duration.  This can make the stream stutter and fail due to the extra overhead.  This patch modifies ffmpeg to cache one redirect connection which it will use as needed.
+---
+ libavformat/http.c | 62 ++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 60 insertions(+), 2 deletions(-)
+
+diff --git a/libavformat/http.c b/libavformat/http.c
+index c5c48c7900..1f4a5cebb2 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -136,6 +136,10 @@ typedef struct HTTPContext {
+     char *new_location;
+     AVDictionary *redirect_cache;
+     uint64_t filesize_from_content_range;
++
++    // BRANE: redirect cache support
++    URLContext *redirected_hd;
++    char *redirected_location;
+ } HTTPContext;
+ 
+ #define OFFSET(x) offsetof(HTTPContext, x)
+@@ -358,6 +362,10 @@ static int http_open_cnx(URLContext *h, AVDictionary **options)
+     uint64_t off;
+     char *cached;
+ 
++    // BRANE: redirect cache support
++    int once=1;
++    char *old_location = strdup(s->location);
++
+ redo:
+ 
+     cached = redirect_cache_get(s);
+@@ -416,8 +424,29 @@ redo:
+     if ((s->http_code == 301 || s->http_code == 302 ||
+          s->http_code == 303 || s->http_code == 307 || s->http_code == 308) &&
+         s->new_location) {
+-        /* url moved, get next */
+-        ffurl_closep(&s->hd);
++
++        // BRANE: redirect cache support
++        if(once == 0) {
++            /* url moved, get next */
++            ffurl_closep(&s->hd);
++
++            // more than one redirect is not supported by this cache
++            if(s->redirected_hd)
++                ffurl_closep(&s->redirected_hd);
++            if(s->redirected_location) {
++                av_free(s->redirected_location);
++                s->redirected_location=NULL;
++            }
++        } else {
++            once = 0;
++            FFSWAP(URLContext *, s->hd, s->redirected_hd);
++            FFSWAP(char *, s->redirected_location, old_location);
++            if(old_location) {
++                av_free(old_location);
++                old_location = NULL;
++            }
++        }
++
+         if (redirects++ >= MAX_REDIRECTS)
+             return AVERROR(EIO);
+ 
+@@ -439,9 +468,15 @@ redo:
+         attempts         = 0;
+         goto redo;
+     }
++    if(old_location) av_free(old_location); // BRANE: redirect cache support
+     return 0;
+ 
+ fail:
++    // BRANE: redirect cache support
++    if(old_location)
++        av_free(old_location);
++    if(s->redirected_hd)
++        ffurl_closep(&s->redirected_hd);
+     if (s->hd)
+         ffurl_closep(&s->hd);
+     if (ret < 0)
+@@ -461,11 +496,15 @@ int ff_http_do_new_request2(URLContext *h, const char *uri, AVDictionary **opts)
+     char hostname1[1024], hostname2[1024], proto1[10], proto2[10];
+     int port1, port2;
+ 
++    // BRANE: redirect cache support
++    int once = 1;
++
+     if (!h->prot ||
+         !(!strcmp(h->prot->name, "http") ||
+           !strcmp(h->prot->name, "https")))
+         return AVERROR(EINVAL);
+ 
++again:
+     av_url_split(proto1, sizeof(proto1), NULL, 0,
+                  hostname1, sizeof(hostname1), &port1,
+                  NULL, 0, s->location);
+@@ -473,6 +512,14 @@ int ff_http_do_new_request2(URLContext *h, const char *uri, AVDictionary **opts)
+                  hostname2, sizeof(hostname2), &port2,
+                  NULL, 0, uri);
+     if (port1 != port2 || strncmp(hostname1, hostname2, sizeof(hostname2)) != 0) {
++
++        // BRANE: redirect cache support
++        if(s->redirected_hd && s->redirected_location) {
++            FFSWAP(URLContext *, s->hd, s->redirected_hd);
++            FFSWAP(char *, s->location, s->redirected_location);
++            if(once) { once=0; goto again; }
++        }
++
+         av_log(h, AV_LOG_ERROR, "Cannot reuse HTTP connection for different host: %s:%d != %s:%d\n",
+             hostname1, port1,
+             hostname2, port2
+@@ -1892,6 +1939,17 @@ static int http_close(URLContext *h)
+     av_dict_free(&s->redirect_cache);
+     av_freep(&s->new_location);
+     av_freep(&s->uri);
++
++    // FIXME: how does s->location get freed?  seems like it doesn't...
++
++    // BRANE: redirect cache support
++    if(s->redirected_hd)
++        ffurl_closep(&s->redirected_hd);
++    if(s->redirected_location) {
++        av_free(s->redirected_location);
++        s->redirected_location = NULL;
++    }
++
+     return ret;
+ }
+ 
+-- 
+2.34.1
+

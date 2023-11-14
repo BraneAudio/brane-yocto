@@ -1,0 +1,31 @@
+From b8f030de205dededfe64bf9287aa83b948595c50 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Fri, 20 Oct 2023 17:48:14 -0500
+Subject: [PATCH] pci-imx6: fixup device class
+
+This driver needs to have its device class defined for it to work
+properly.
+---
+ drivers/pci/controller/dwc/pci-imx6.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/drivers/pci/controller/dwc/pci-imx6.c b/drivers/pci/controller/dwc/pci-imx6.c
+index 47db2d20568e..7d9260ea0d26 100644
+--- a/drivers/pci/controller/dwc/pci-imx6.c
++++ b/drivers/pci/controller/dwc/pci-imx6.c
+@@ -1356,6 +1356,12 @@ static const struct of_device_id imx6_pcie_of_match[] = {
+ 	{},
+ };
+ 
++// BRANE: this driver needs to set the device class
++static void imx6_fixup_class(struct pci_dev *dev) {
++	dev->class = PCI_CLASS_BRIDGE_PCI_NORMAL;
++}
++DECLARE_PCI_FIXUP_EARLY(PCI_VENDOR_ID_SYNOPSYS, PCI_ANY_ID, imx6_fixup_class);
++
+ static struct platform_driver imx6_pcie_driver = {
+ 	.driver = {
+ 		.name	= "imx6q-pcie",
+-- 
+2.34.1
+

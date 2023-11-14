@@ -1,0 +1,2 @@
+PACKAGECONFIG:class-target = "gdbm"
+

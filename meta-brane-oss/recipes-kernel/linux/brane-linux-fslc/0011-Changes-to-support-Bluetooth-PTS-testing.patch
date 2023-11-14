@@ -1,0 +1,155 @@
+From dd00a9e17d12935834e05d278799eabd981b4a02 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Mon, 23 Oct 2023 10:47:13 -0500
+Subject: [PATCH] Changes to support Bluetooth PTS testing
+
+---
+ include/net/bluetooth/l2cap.h |  9 +++++++
+ net/bluetooth/l2cap_core.c    | 44 +++++++++++++++++++++++++++++++----
+ 2 files changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/include/net/bluetooth/l2cap.h b/include/net/bluetooth/l2cap.h
+index 2f766e3437ce..b5b4ad43482b 100644
+--- a/include/net/bluetooth/l2cap.h
++++ b/include/net/bluetooth/l2cap.h
+@@ -202,6 +202,12 @@ struct l2cap_conninfo {
+ #define L2CAP_REJ_MTU_EXCEEDED		0x0001
+ #define L2CAP_REJ_INVALID_CID		0x0002
+ 
++/* Flags for Brane Bluetooth Patches */
++#define L2CAP_BRANE_FLAGS_NONE								0x00
++#define L2CAP_BRANE_FLAG_PENDING_REJECT					0x01
++#define L2CAP_BRANE_FLAG_TEST_LENGTH_26_DETECTED		0x02
++#define L2CAP_BRANE_FLAG_TEST_MTU_48_DETECTED			0x04
++
+ /* L2CAP structures */
+ struct l2cap_hdr {
+ 	__le16     len;
+@@ -704,6 +710,9 @@ struct l2cap_conn {
+ 	struct mutex		chan_lock;
+ 	struct kref		ref;
+ 	struct list_head	users;
++
++	__u8 brane_flag0;
++	__u8 brane_flag1;
+ };
+ 
+ struct l2cap_user {
+diff --git a/net/bluetooth/l2cap_core.c b/net/bluetooth/l2cap_core.c
+index 02fc9961464c..0520fc363025 100644
+--- a/net/bluetooth/l2cap_core.c
++++ b/net/bluetooth/l2cap_core.c
+@@ -801,7 +801,7 @@ static void l2cap_chan_connect_reject(struct l2cap_chan *chan)
+ 		result = L2CAP_CR_SEC_BLOCK;
+ 	else
+ 		result = L2CAP_CR_BAD_PSM;
+-
++ 
+ 	l2cap_state_change(chan, BT_DISCONN);
+ 
+ 	rsp.scid   = cpu_to_le16(chan->dcid);
+@@ -3559,7 +3559,7 @@ static int l2cap_build_conf_req(struct l2cap_chan *chan, void *data, size_t data
+ 	return ptr - data;
+ }
+ 
+-static int l2cap_parse_conf_req(struct l2cap_chan *chan, void *data, size_t data_size)
++static int l2cap_parse_conf_req(struct l2cap_chan *chan, void *data, size_t data_size, u8 *brane_flags)
+ {
+ 	struct l2cap_conf_rsp *rsp = data;
+ 	void *ptr = rsp->data;
+@@ -3590,6 +3590,10 @@ static int l2cap_parse_conf_req(struct l2cap_chan *chan, void *data, size_t data
+ 			if (olen != 2)
+ 				break;
+ 			mtu = val;
++/* Brane PTS L2CAP/COS/CED/BV-09-C */ 
++			if(mtu == 48){  
++				*brane_flags = L2CAP_BRANE_FLAG_TEST_MTU_48_DETECTED;			
++			}
+ 			break;
+ 
+ 		case L2CAP_CONF_FLUSH_TO:
+@@ -4267,6 +4271,19 @@ static struct l2cap_chan *l2cap_connect(struct l2cap_conn *conn,
+ 		chan->num_conf_req++;
+ 	}
+ 
++/* Brane PTS L2CAP/COS/CED/BI-02-C */
++
++	if(conn->brane_flag0 == L2CAP_BRANE_FLAG_PENDING_REJECT){
++
++		struct l2cap_cmd_rej_unk rej;
++
++		rej.reason = cpu_to_le16(L2CAP_REJ_NOT_UNDERSTOOD);
++		l2cap_send_cmd(conn, cmd->ident, L2CAP_COMMAND_REJ,
++						sizeof(rej), &rej);
++
++		conn->brane_flag0 = L2CAP_BRANE_FLAGS_NONE;
++	}
++
+ 	return chan;
+ }
+ 
+@@ -4426,6 +4443,7 @@ static inline int l2cap_config_req(struct l2cap_conn *conn,
+ 	u8 rsp[64];
+ 	struct l2cap_chan *chan;
+ 	int len, err = 0;
++	u8 brane_flags = 0;
+ 
+ 	if (cmd_len < sizeof(*req))
+ 		return -EPROTO;
+@@ -4470,17 +4488,25 @@ static inline int l2cap_config_req(struct l2cap_conn *conn,
+ 	}
+ 
+ 	/* Complete config. */
+-	len = l2cap_parse_conf_req(chan, rsp, sizeof(rsp));
++	len = l2cap_parse_conf_req(chan, rsp, sizeof(rsp), &brane_flags);
+ 	if (len < 0) {
+ 		l2cap_send_disconn_req(chan, ECONNRESET);
+ 		goto unlock;
+ 	}
+-
++ 
+ 	chan->ident = cmd->ident;
+ 	l2cap_send_cmd(conn, cmd->ident, L2CAP_CONF_RSP, len, rsp);
+ 	if (chan->num_conf_rsp < L2CAP_CONF_MAX_CONF_RSP)
+ 		chan->num_conf_rsp++;
+ 
++/* Brane PTS L2CAP/COS/CED/BV-09-C */
++	if((brane_flags == L2CAP_BRANE_FLAG_TEST_MTU_48_DETECTED) &&
++	   (conn->brane_flag1 == L2CAP_BRANE_FLAG_TEST_LENGTH_26_DETECTED) &&
++		(cmd_len == 8)){
++		l2cap_send_disconn_req(chan, ECONNRESET);
++	}
++	conn->brane_flag1 = L2CAP_BRANE_FLAGS_NONE;
++
+ 	/* Reset config buffer. */
+ 	chan->conf_len = 0;
+ 
+@@ -6500,6 +6526,12 @@ static inline void l2cap_sig_channel(struct l2cap_conn *conn,
+ 	if (hcon->type != ACL_LINK)
+ 		goto drop;
+ 
++/* Brane PTS L2CAP/COS/CED/BV-09-C */
++   conn->brane_flag1 = L2CAP_BRANE_FLAGS_NONE;
++   if (skb->len == 26){
++      conn->brane_flag1 = L2CAP_BRANE_FLAG_TEST_LENGTH_26_DETECTED;			
++   }
++
+ 	while (skb->len >= L2CAP_CMD_HDR_SIZE) {
+ 		u16 len;
+ 
+@@ -8494,8 +8526,12 @@ void l2cap_recv_acldata(struct hci_conn *hcon, struct sk_buff *skb, u16 flags)
+ 	case ACL_START:
+ 	case ACL_START_NO_FLUSH:
+ 	case ACL_COMPLETE:
++/* Brane PTS L2CAP/COS/CED/BI-02-C */
++		conn->brane_flag0 = L2CAP_BRANE_FLAGS_NONE;
+ 		if (conn->rx_skb) {
+ 			BT_ERR("Unexpected start frame (len %d)", skb->len);
++			conn->brane_flag0 = L2CAP_BRANE_FLAG_PENDING_REJECT;			
++
+ 			l2cap_recv_reset(conn);
+ 			l2cap_conn_unreliable(conn, ECOMM);
+ 		}
+-- 
+2.34.1
+

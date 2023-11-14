@@ -1,0 +1,25 @@
+From 9e523b8789984424dd60a723d221f348e5c81204 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Mon, 19 Jun 2023 14:48:04 -0500
+Subject: [PATCH] BCT: fix mdns subsequent conflicts
+
+---
+ mDNSCore/mDNS.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mDNSCore/mDNS.c b/mDNSCore/mDNS.c
+index 9466634..0fe37c9 100644
+--- a/mDNSCore/mDNS.c
++++ b/mDNSCore/mDNS.c
+@@ -10959,7 +10959,7 @@ mDNSlocal void mDNSCoreReceiveResponse(mDNS *const m, const DNSMessage *const re
+                                         rr->ProbingConflictCount++;
+                                         rr->LastConflictPktNum = m->MPktNum;
+                                         if (ResponseMCast && (!intf || intf->SupportsUnicastMDNSResponse) &&
+-                                            (rr->ProbingConflictCount <= kMaxAllowedMCastProbingConflicts))
++                                            (rr->ProbingConflictCount < kMaxAllowedMCastProbingConflicts)) // BRANE: only do this ONCE
+                                         {
+                                             LogMsg("mDNSCoreReceiveResponse: ProbeCount %d; restarting probing after %d-tick pause due to possibly "
+                                                 "spurious multicast conflict (%d/%d) via interface %d for %s",
+-- 
+2.34.1
+

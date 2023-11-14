@@ -1,0 +1,1677 @@
+From 90d83cc6adfca8ddbb9764e09e4dbf76938a40e3 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Tue, 17 Oct 2023 12:52:20 -0500
+Subject: [PATCH] add board files
+
+---
+ arch/arm/mach-imx/mx7/Kconfig         |  29 ++
+ board/brane/ctrl1/Kconfig             |  21 ++
+ board/brane/ctrl1/Makefile            |   9 +
+ board/brane/ctrl1/brane-boot-select.c | 377 ++++++++++++++++++++++++++
+ board/brane/ctrl1/brane-ctrl1.c       | 145 ++++++++++
+ board/brane/ctrl1/brane-device.c      | 153 +++++++++++
+ board/brane/ctrl1/brane-device.h      |  48 ++++
+ board/brane/ctrl1/brane-file.c        | 241 ++++++++++++++++
+ board/brane/ctrl1/brane-srk.c         | 226 +++++++++++++++
+ board/brane/ctrl1/brane-work.c        |  48 ++++
+ board/brane/ctrl1/brane-work.h        |  50 ++++
+ board/brane/ctrl1/imximage.cfg        | 104 +++++++
+ include/configs/brane-ctrl1.h         | 100 +++++++
+ 13 files changed, 1551 insertions(+)
+ create mode 100644 board/brane/ctrl1/Kconfig
+ create mode 100644 board/brane/ctrl1/Makefile
+ create mode 100644 board/brane/ctrl1/brane-boot-select.c
+ create mode 100644 board/brane/ctrl1/brane-ctrl1.c
+ create mode 100644 board/brane/ctrl1/brane-device.c
+ create mode 100644 board/brane/ctrl1/brane-device.h
+ create mode 100644 board/brane/ctrl1/brane-file.c
+ create mode 100644 board/brane/ctrl1/brane-srk.c
+ create mode 100644 board/brane/ctrl1/brane-work.c
+ create mode 100644 board/brane/ctrl1/brane-work.h
+ create mode 100644 board/brane/ctrl1/imximage.cfg
+ create mode 100644 include/configs/brane-ctrl1.h
+
+diff --git a/arch/arm/mach-imx/mx7/Kconfig b/arch/arm/mach-imx/mx7/Kconfig
+index 0cad825287..93af572e92 100644
+--- a/arch/arm/mach-imx/mx7/Kconfig
++++ b/arch/arm/mach-imx/mx7/Kconfig
+@@ -102,6 +102,34 @@ config TARGET_COLIBRI_IMX7
+ 	select MX7D
+ 	imply CMD_DM
+ 
++config TARGET_BRANE_CTRL1
++	bool "brane-ctrl1"
++	select BOARD_LATE_INIT
++	select MX7D
++	select DM
++	select DM_THERMAL
++
++config TARGET_BRANE_CTRL1_FIXTURE
++	bool "brane-ctrl1"
++	select BOARD_LATE_INIT
++	select MX7D
++	select DM
++	select DM_THERMAL
++
++config TARGET_BRANE_CTRL1_CALDRAM
++	bool "brane-ctrl1"
++	select BOARD_LATE_INIT
++	select MX7D
++	select DM
++	select DM_THERMAL
++
++config TARGET_BRANE_CTRL1_BRINGUP
++	bool "brane-ctrl1"
++	select BOARD_LATE_INIT
++	select MX7D
++	select DM
++	select DM_THERMAL
++
+ endchoice
+ 
+ config SYS_SOC
+@@ -115,5 +143,6 @@ source "board/storopack/smegw01/Kconfig"
+ source "board/technexion/pico-imx7d/Kconfig"
+ source "board/toradex/colibri_imx7/Kconfig"
+ source "board/warp7/Kconfig"
++source "board/brane/ctrl1/Kconfig"
+ 
+ endif
+diff --git a/board/brane/ctrl1/Kconfig b/board/brane/ctrl1/Kconfig
+new file mode 100644
+index 0000000000..bef044cbdb
+--- /dev/null
++++ b/board/brane/ctrl1/Kconfig
+@@ -0,0 +1,21 @@
++if TARGET_BRANE_CTRL1 || \
++   TARGET_BRANE_CTRL1_FIXTURE || \
++   TARGET_BRANE_CTRL1_CALDRAM || \
++   TARGET_BRANE_CTRL1_BRINGUP
++
++config SYS_BOARD
++	default "ctrl1"
++
++config SYS_VENDOR
++	default "brane"
++
++config SYS_CONFIG_NAME
++	default "brane-ctrl1"
++
++config SYS_TEXT_BASE
++	default 0x87800000
++
++config IMX_CONFIG
++	default "board/brane/ctrl1/imximage.cfg"
++
++endif
+diff --git a/board/brane/ctrl1/Makefile b/board/brane/ctrl1/Makefile
+new file mode 100644
+index 0000000000..38c057bbe0
+--- /dev/null
++++ b/board/brane/ctrl1/Makefile
+@@ -0,0 +1,9 @@
++# Copyright (C) 2023 Brane Audio
++# 
++# SPDX-License-Identifier: GPL-2.0
++obj-y  := brane-ctrl1.o
++obj-y  += brane-work.o
++obj-y  += brane-srk.o
++obj-y  += brane-device.o
++obj-y  += brane-file.o
++obj-y  += brane-boot-select.o
+diff --git a/board/brane/ctrl1/brane-boot-select.c b/board/brane/ctrl1/brane-boot-select.c
+new file mode 100644
+index 0000000000..7f607689b2
+--- /dev/null
++++ b/board/brane/ctrl1/brane-boot-select.c
+@@ -0,0 +1,377 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <asm/mach-imx/hab.h>
++#include <common.h>
++#include <image.h>
++#include <configs/brane-ctrl1.h>
++#include "brane-work.h"
++
++#define OK_ATTEMPTS_NOT_THERE 0xFFFFFFFF
++
++#define TRY_TWO_FILE             "/try_two"
++#define TWO_TRIED_FILE           "/tried_two"
++#define TWO_OK_FILE              "/two_ok"
++#define TRY_THREE_FILE           "/try_three"
++#define THREE_TRIED_FILE         "/tried_three"
++#define THREE_OK_FILE            "/three_ok"
++
++#define NO_PARTITION_SELECTED       0
++#define ATTEMPT_PARTITION_2         2
++#define ATTEMPT_PARTITION_3         3
++
++#define MAX_TOTAL_BOOT_ATTEMPTS        16
++
++#define EXTEND_WATCHDOG_BOOT_ATTEMPTS  8
++
++#define MAX_ATTEMPTS_ON_PARTITION 4
++
++#define NORMAL_WATCHDOG_TIMEOUT  20000
++#define LONG_WATCHDOG_TIMEOUT    (NORMAL_WATCHDOG_TIMEOUT << 2)
++
++#define IVT_ALIGN_SIZE           0x1000
++
++#define DEFAULT_CONSOLE_STRING   "ttymxc0"
++#define DEFAULT_BAUD_STRING      "115200"
++
++static uint32_t last_tried = NO_PARTITION_SELECTED;
++static uint32_t mount_failed = false;
++static uint32_t total_attempts = 0;
++static uint32_t use_long_watchdog = false;
++
++static uint32_t timed_out = false;
++
++typedef enum bootable_partitions_e {
++   BOOT_PARTITION_2 = 0,
++   BOOT_PARTITION_3,
++
++   NUM_BOOT_PARTITIONS
++} bootable_partitions_t;
++
++typedef struct partition_file_info_s {
++   uint32_t partition_num;
++   const char *dev_and_part;
++   const char *try_file;
++   const char *tried_file;
++   const char *ok_file;
++   uint32_t try_exists;
++   uint32_t tried_exists;
++   uint32_t ok_exists;
++   uint32_t tried_attempts;
++   uint32_t ok_attempts;
++   uint32_t scratch_attempts;
++   uint32_t kernel_or_dev_tree_file_prob;
++   uint32_t failed_hab;
++} partition_file_info_t;
++
++static partition_file_info_t part_file_info[NUM_BOOT_PARTITIONS] = {
++   { ATTEMPT_PARTITION_2, PART_TWO_DEV_AND_PART,   TRY_TWO_FILE,   TWO_TRIED_FILE,   TWO_OK_FILE,   0 }, 
++   { ATTEMPT_PARTITION_3, PART_THREE_DEV_AND_PART, TRY_THREE_FILE, THREE_TRIED_FILE, THREE_OK_FILE, 0 }
++};
++
++static void init_part_file_info(void)
++{
++   uint32_t i;
++
++   for( i = 0; i < NUM_BOOT_PARTITIONS; i++ ) {
++      part_file_info[i].try_exists = false;
++      part_file_info[i].tried_exists = false;
++      part_file_info[i].ok_exists = false;
++      part_file_info[i].tried_attempts = 0;
++      part_file_info[i].ok_attempts = 0;
++      part_file_info[i].scratch_attempts = 0;
++      part_file_info[i].kernel_or_dev_tree_file_prob = false;
++      part_file_info[i].failed_hab = false;
++   }
++}
++
++static void init_vals_from_scratchpad_and_watchdog(void)
++{
++   uint32_t scratch_val = 0;
++
++   read_scratchpad(&scratch_val);
++   last_tried = (scratch_val & LAST_TRIED_PARTITION_MASK) >> LAST_TRIED_PARTITION_SHIFT;
++   total_attempts = (scratch_val & TOTAL_ATTEMPTS_MASK) >> TOTAL_ATTEMPTS_SHIFT;
++   part_file_info[BOOT_PARTITION_2].scratch_attempts = (scratch_val & PARTITION_2_ATTEMPTS_MASK)
++                        >> PARTITION_2_ATTEMPTS_SHIFT;
++   part_file_info[BOOT_PARTITION_3].scratch_attempts = (scratch_val & PARTITION_3_ATTEMPTS_MASK)
++                        >> PARTITION_3_ATTEMPTS_SHIFT;
++
++   if( scratch_val & PART_3_HAB_CHECK_FAILED ) {
++      part_file_info[BOOT_PARTITION_3].failed_hab = true;
++   }
++   if( scratch_val & PART_2_HAB_CHECK_FAILED ) {
++      part_file_info[BOOT_PARTITION_2].failed_hab = true;
++   }
++
++   if( total_attempts >= MAX_TOTAL_BOOT_ATTEMPTS ) {
++      reset_speaker();
++   } else if( total_attempts >= EXTEND_WATCHDOG_BOOT_ATTEMPTS ) {
++      use_long_watchdog = true;
++   } else {
++      use_long_watchdog = false;
++   }
++
++   timed_out = check_for_watchdog_timeout();
++}
++
++
++static uint32_t use_device_to_determine_partition(void)
++{
++   uint32_t part_to_use = ATTEMPT_PARTITION_2;
++
++   if( timed_out && (last_tried == ATTEMPT_PARTITION_2) ) {
++      part_to_use =  ATTEMPT_PARTITION_3;
++   }
++
++   return part_to_use;
++}
++
++static void init_vals_from_files(void)
++{
++   uint32_t file_exists = false;
++   uint32_t file_size = 0;
++   uint32_t i;
++
++   for( i = 0; i < NUM_BOOT_PARTITIONS; i++ ) {
++      if( check_file_exists(part_file_info[i].try_file, COMMON_DEV_AND_PART, &file_exists, &file_size) ) {
++         mount_failed = true;
++         return;
++      }
++      part_file_info[i].try_exists = file_exists;
++
++      check_file_exists(part_file_info[i].tried_file, COMMON_DEV_AND_PART, &file_exists, &file_size); 
++      part_file_info[i].tried_exists = file_exists;
++      if( file_exists && (file_size == BRANE_FILE_SIZE) ) {
++         read_4_byte_file(part_file_info[i].tried_file, &(part_file_info[i].tried_attempts));
++      }
++
++      check_file_exists(part_file_info[i].ok_file, COMMON_DEV_AND_PART, &file_exists, &file_size); 
++      part_file_info[i].ok_exists = file_exists;
++      if( file_exists && (file_size == BRANE_FILE_SIZE) ) {
++         read_4_byte_file(part_file_info[i].ok_file, &(part_file_info[i].ok_attempts));
++      } else if( file_exists && !file_size ) {
++         part_file_info[i].ok_attempts = OK_ATTEMPTS_NOT_THERE;
++      }
++   }
++}
++
++static uint32_t choose_partition_to_boot(void)
++{
++   uint32_t try_partition_existed = NO_PARTITION_SELECTED;
++   uint32_t which_partition = NO_PARTITION_SELECTED;
++   uint32_t i;
++
++   mount_failed = false;
++   init_part_file_info();
++   init_vals_from_scratchpad_and_watchdog();
++   init_vals_from_files();
++
++   if( mount_failed ) {
++      return use_device_to_determine_partition();
++   }
++   
++   for( i = 0; i < NUM_BOOT_PARTITIONS; i++ ) {
++      if( part_file_info[i].try_exists ) {
++         try_partition_existed = part_file_info[i].partition_num;
++
++         if( part_file_info[i].tried_exists ) {
++            if( !part_file_info[i].ok_exists
++                  || (part_file_info[i].tried_attempts <
++                           part_file_info[i].ok_attempts) ) {
++
++               if( part_file_info[i].scratch_attempts < MAX_ATTEMPTS_ON_PARTITION ) {
++                  which_partition = part_file_info[i].partition_num;
++               }
++            } else if( (part_file_info[i].tried_attempts -
++                                 part_file_info[i].ok_attempts) <
++                              MAX_ATTEMPTS_ON_PARTITION ) {
++               which_partition = part_file_info[i].partition_num;
++            }
++         } else {
++            if( !timed_out ) {
++               which_partition = part_file_info[i].partition_num;
++            } else {
++               if( part_file_info[i].scratch_attempts < MAX_ATTEMPTS_ON_PARTITION ) {
++                  which_partition = part_file_info[i].partition_num;
++               }
++            }
++         }
++      }
++
++      if( which_partition ) {
++         break;
++      }
++   }
++
++   if( !which_partition ) {
++      which_partition = use_device_to_determine_partition();
++   }
++
++   return which_partition;
++}
++
++static void update_tried_and_scratchpad(uint32_t part_index)
++{
++   uint32_t scratch_val;
++
++   total_attempts++;
++   part_file_info[part_index].tried_attempts++;
++   if( part_file_info[part_index].scratch_attempts < MAX_ATTEMPTS_ON_PARTITION ) {
++      part_file_info[part_index].scratch_attempts++;
++   } else {
++      part_file_info[part_index].scratch_attempts = MAX_ATTEMPTS_ON_PARTITION;
++   }
++   write_4_byte_file(part_file_info[part_index].tried_file,
++                     part_file_info[part_index].tried_attempts);
++
++   scratch_val = (part_file_info[part_index].partition_num << LAST_TRIED_PARTITION_SHIFT)
++                     & LAST_TRIED_PARTITION_MASK;
++   scratch_val |= (total_attempts << TOTAL_ATTEMPTS_SHIFT) & TOTAL_ATTEMPTS_MASK;
++   scratch_val |= (part_file_info[BOOT_PARTITION_2].scratch_attempts << PARTITION_2_ATTEMPTS_SHIFT)
++                     & PARTITION_2_ATTEMPTS_MASK;
++   scratch_val |= (part_file_info[BOOT_PARTITION_3].scratch_attempts << PARTITION_3_ATTEMPTS_SHIFT)
++                     & PARTITION_3_ATTEMPTS_MASK;
++   scratch_val |= part_file_info[BOOT_PARTITION_3].failed_hab ? PART_3_HAB_CHECK_FAILED : 0;
++   scratch_val |= part_file_info[BOOT_PARTITION_2].failed_hab ? PART_2_HAB_CHECK_FAILED : 0;
++   scratch_val |= mount_failed ? NO_MOUNT_COMMON_PARTITION : 0;
++   write_scratchpad( scratch_val );
++}
++
++static void arm_the_watchdog(void)
++{
++   if( !use_long_watchdog ) {
++      arm_watchdog_timeout( NORMAL_WATCHDOG_TIMEOUT );
++   } else {
++      arm_watchdog_timeout( LONG_WATCHDOG_TIMEOUT );
++   }
++}
++
++static void setup_env_vars( uint32_t part_index )
++{
++   char tmp_str[MAX_ENV_STR_LEN];
++   char *lcl_console = env_get("console");
++   char *lcl_baud = env_get("baudrate");
++
++   snprintf(tmp_str, MAX_ENV_STR_LEN, "console=%s,%s quiet uver=%s%c root=/dev/mmcblk%sp%u rootwait rw",
++                        lcl_console ? lcl_console : DEFAULT_CONSOLE_STRING,
++                        lcl_baud ? lcl_baud : DEFAULT_BAUD_STRING,
++                        BRANE_UBOOT_VER_STR,
++                        secondary_running ? 's' : 'p',
++                        BRANE_MMC_DEV,
++                        part_file_info[part_index].partition_num );
++   env_set("bootargs", tmp_str);
++
++}
++
++void prep_for_boot(uint32_t set_watchdog)
++{
++   uint32_t partition_to_use;
++   uint32_t partition_index = NUM_BOOT_PARTITIONS;
++   uint32_t failed = false;
++   uint32_t num_attempts = 0;
++   uint32_t done = false;
++   int32_t ret;
++	ulong    zi_start, zi_end;
++   uint32_t ivt_offset;
++   uint32_t file_exists;
++   uint32_t kernel_file_size;
++
++   partition_to_use = choose_partition_to_boot();
++
++   if( partition_to_use == ATTEMPT_PARTITION_2 ) {
++      partition_index = BOOT_PARTITION_2;
++   } else if( partition_to_use == ATTEMPT_PARTITION_3 ) {
++      partition_index = BOOT_PARTITION_3;
++   } else {
++      return;
++   }
++
++   while( !done ) {
++      failed = false;
++
++      if( check_file_exists(KERNEL_IMAGE, 
++                           part_file_info[partition_index].dev_and_part,
++                           &file_exists,
++                           &kernel_file_size) ) {
++         mount_failed = true;
++         part_file_info[partition_index].kernel_or_dev_tree_file_prob = true;
++         failed = true;
++      } else if( !file_exists ) {
++         part_file_info[partition_index].kernel_or_dev_tree_file_prob = true;
++         failed = true;
++      } else if( read_file_into_memory(KERNEL_IMAGE,
++                                 part_file_info[partition_index].dev_and_part,
++                                 KERNEL_LOAD_ADDRESS) ) {
++         part_file_info[partition_index].kernel_or_dev_tree_file_prob = true;
++         failed = true;
++      }
++
++      if( !failed ) {
++         check_file_exists(KERNEL_DEV_TREE, 
++                           part_file_info[partition_index].dev_and_part,
++                           &file_exists,
++                           NULL);
++         if( !file_exists ) {
++            part_file_info[partition_index].kernel_or_dev_tree_file_prob = true;
++            failed = true;
++         } else if( read_file_into_memory(KERNEL_DEV_TREE, 
++                                    part_file_info[partition_index].dev_and_part,
++                                    DEV_TREE_LOAD_ADDRESS) ) {
++            part_file_info[partition_index].kernel_or_dev_tree_file_prob = true;
++            failed = true;
++         }
++      }
++
++      if( !failed ) {
++         ret = bootz_setup(KERNEL_LOAD_ADDRESS, &zi_start, &zi_end);
++         if (ret != 0) {
++            failed = true;
++         } else {
++            ivt_offset = ((uint32_t)(zi_end - zi_start) + IVT_ALIGN_SIZE - 1) 
++                                    & ~(IVT_ALIGN_SIZE - 1);
++            if( imx_hab_authenticate_image(KERNEL_LOAD_ADDRESS,
++                                       kernel_file_size, ivt_offset) ) {
++               failed = true;
++            }
++         }
++      }
++
++      if( !failed ) {
++         part_file_info[partition_index].failed_hab = false;
++         done = true;
++      } else {
++         part_file_info[partition_index].failed_hab = true;
++
++         if( num_attempts < NUM_BOOT_PARTITIONS ) {
++            num_attempts++;
++            if( partition_index == BOOT_PARTITION_2 ) {
++               if( part_file_info[BOOT_PARTITION_3].kernel_or_dev_tree_file_prob ) {
++                  done = true;
++               } else {
++                  partition_index = BOOT_PARTITION_3;
++               }
++            } else {
++               if( part_file_info[BOOT_PARTITION_2].kernel_or_dev_tree_file_prob ) {
++                  done = true;
++               } else {
++                  partition_index = BOOT_PARTITION_2;
++               }
++            }
++         } else {
++            done = true;
++         }
++      }
++   }
++
++   update_tried_and_scratchpad( partition_index );
++
++   setup_env_vars( partition_index );
++
++   if( set_watchdog ) {
++      arm_the_watchdog();
++   }
++}
+\ No newline at end of file
+diff --git a/board/brane/ctrl1/brane-ctrl1.c b/board/brane/ctrl1/brane-ctrl1.c
+new file mode 100644
+index 0000000000..9e67c1a60a
+--- /dev/null
++++ b/board/brane/ctrl1/brane-ctrl1.c
+@@ -0,0 +1,145 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <asm/arch/clock.h>
++#include <asm/arch/imx-regs.h>
++#include <asm/arch/mx7-pins.h>
++#include <asm/arch/sys_proto.h>
++#include <asm/gpio.h>
++#include <asm/mach-imx/iomux-v3.h>
++#ifdef CONFIG_CMD_BMODE
++#include <asm/mach-imx/boot_mode.h>
++#endif
++#include <asm/io.h>
++#include <linux/sizes.h>
++#include <common.h>
++#include <fsl_esdhc_imx.h>
++#include <mmc.h>
++#include <miiphy.h>
++#include <netdev.h>
++#include <power/pmic.h>
++#include <power/pfuze3000_pmic.h>
++#include <i2c.h>
++#include <asm/mach-imx/mxc_i2c.h>
++#include <asm/arch/crm_regs.h>
++
++#include "brane-work.h"
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define UART_PAD_CTRL (PAD_CTL_DSE_3P3V_49OHM \
++                     | PAD_CTL_PUS_PU100KOHM  \
++                     | PAD_CTL_HYS)
++
++#define SECONDARY_BOOT_USED_BIT     0x40000000
++
++uint32_t secondary_running = false;
++
++int dram_init(void)
++{
++	gd->ram_size = PHYS_SDRAM_SIZE;
++	return 0;
++}
++
++static iomux_v3_cfg_t const wdog_pads[] = {
++	MX7D_PAD_GPIO1_IO00__WDOG1_WDOG_B | MUX_PAD_CTRL(NO_PAD_CTRL),
++};
++
++static iomux_v3_cfg_t const uart1_pads[] = {
++	MX7D_PAD_UART1_TX_DATA__UART1_DCE_TX | MUX_PAD_CTRL(UART_PAD_CTRL),
++	MX7D_PAD_UART1_RX_DATA__UART1_DCE_RX | MUX_PAD_CTRL(UART_PAD_CTRL),
++};
++
++static void setup_iomux_uart(void)
++{
++	imx_iomux_v3_setup_multiple_pads(uart1_pads, ARRAY_SIZE(uart1_pads));
++}
++
++int board_early_init_f(void)
++{
++	setup_iomux_uart();
++	return 0;
++}
++
++int board_init(void)
++{
++	gd->bd->bi_boot_params = PHYS_SDRAM + 0x100;
++	return 0;
++}
++
++
++#ifdef CONFIG_DM_PMIC
++int power_init_board(void)
++{
++	struct udevice *dev;
++	int ret, dev_id, rev_id;
++
++	ret = pmic_get("pfuze3000", &dev);
++	if(ret == -ENODEV) return 0;
++	if(ret != 0) return ret;
++
++	dev_id = pmic_reg_read(dev, PFUZE3000_DEVICEID);
++	rev_id = pmic_reg_read(dev, PFUZE3000_REVID);
++	printf("PMIC:  PFUZE3000 DEV_ID=0x%x REV_ID=0x%x\n", dev_id, rev_id);
++
++	pmic_clrsetbits(dev, PFUZE3000_LDOGCTL, 0, 1);
++
++	/*
++	 * Set the voltage of VLDO4 output to 2.8V which feeds
++	 * the MIPI DSI and MIPI CSI inputs.
++	 */
++	pmic_clrsetbits(dev, PFUZE3000_VLD4CTL, 0xF, 0xA);
++
++	return 0;
++}
++#endif
++
++static void check_which_uboot(void)
++{
++   struct src *src_regs = (struct src *)SRC_BASE_ADDR;
++   uint32_t reg_val;
++
++   reg_val = readl(&src_regs->gpr10);
++   if( reg_val & SECONDARY_BOOT_USED_BIT) {
++      secondary_running = true;
++   }
++   else {
++      secondary_running = false;
++   }
++}
++
++int board_late_init(void)
++{
++	struct wdog_regs *wdog = (struct wdog_regs *)WDOG1_BASE_ADDR;
++
++#ifdef CONFIG_ENV_IS_IN_MMC
++	board_late_mmc_env_init();
++#endif
++
++	imx_iomux_v3_setup_multiple_pads(wdog_pads, ARRAY_SIZE(wdog_pads));
++
++	set_wdog_reset(wdog);
++
++	/*
++	 * Do not assert internal WDOG_RESET_B_DEB(controlled by bit 4),
++	 * since we use PMIC_PWRON to reset the board.
++	 */
++	clrsetbits_le16(&wdog->wcr, 0, 0x10);
++
++   check_which_uboot();
++
++	return 0;
++}
++
++int checkboard(void)
++{
++	char *mode;
++	if(IS_ENABLED(CONFIG_ARMV7_BOOT_SEC_DEFAULT)) mode = "secure";
++	else                                          mode = "non-secure";
++	printf("Board: Brane1 in %s mode\n", mode);
++	return 0;
++}
++
+diff --git a/board/brane/ctrl1/brane-device.c b/board/brane/ctrl1/brane-device.c
+new file mode 100644
+index 0000000000..72d1d9a6da
+--- /dev/null
++++ b/board/brane/ctrl1/brane-device.c
+@@ -0,0 +1,153 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <common.h>
++#include <cpu_func.h>
++#include <dm.h>
++#include <i2c.h>
++#include <asm/arch/imx-regs.h>
++#include <asm/mach-imx/mxc_i2c.h>
++#include "brane-work.h"
++
++static struct udevice *i2c_device_bus = NULL;
++
++static int32_t setup_device_i2c(void)
++{
++   struct udevice *lcl_bus;
++   int32_t ret_val = 0;
++
++   if( !i2c_device_bus ) {
++      ret_val = uclass_get_device_by_seq(UCLASS_I2C, BRANE_DEV_I2C_BUS_NUM, &lcl_bus);
++      if( !ret_val ) {
++         i2c_device_bus = lcl_bus;
++      }
++   }
++   return ret_val;
++}
++
++static int32_t read_from_device_i2c(uint32_t read_addr, uint32_t *read_val)
++{
++   int32_t ret_val;
++   struct udevice *dev;
++   uint32_t lcl_read_val;
++
++   if( !read_val ) {
++      return -1;
++   }
++   if( read_addr > BRANE_DEV_MAX_ADDR ) {
++      return -1;
++   }
++
++   ret_val = setup_device_i2c();
++   if( ret_val ) {
++      return ret_val;
++   }
++   ret_val = i2c_get_chip( i2c_device_bus, read_addr, 1, &dev );
++   if( ret_val ) {
++      return ret_val;
++   }
++   ret_val = i2c_set_chip_offset_len(dev, BRANE_DEV_I2C_CHIP_OFFSET_LEN);
++   if( ret_val ) {
++      return ret_val;
++   }
++
++   ret_val = dm_i2c_read(dev, BRANE_DEV_I2C_REGISTER_ADDR, (uint8_t *)&lcl_read_val,
++                        BRANE_DEV_REGISTER_BYTE_SIZE);
++   if( ret_val ) {
++      return ret_val;
++   }
++   *read_val = lcl_read_val;
++
++   return 0;
++}
++
++static int32_t write_to_device_i2c(uint32_t write_addr, uint32_t write_val)
++{
++   int32_t ret_val;
++   struct udevice *dev;
++   struct dm_i2c_chip *i2c_chip;
++
++   if( write_addr > BRANE_DEV_MAX_ADDR ) {
++      return -1;
++   }
++
++   ret_val = setup_device_i2c();
++   if( ret_val ) {
++      return ret_val;
++   }
++   ret_val = i2c_get_chip( i2c_device_bus, write_addr, 1, &dev );
++   if( ret_val ) {
++      return ret_val;
++   }
++   ret_val = i2c_set_chip_offset_len(dev, BRANE_DEV_I2C_CHIP_OFFSET_LEN);
++   if( ret_val ) {
++      return ret_val;
++   }
++   i2c_chip = dev_get_parent_plat(dev);
++   if (!i2c_chip) {
++      return -1;
++   }
++
++   i2c_chip->flags &= ~DM_I2C_CHIP_WR_ADDRESS;
++
++   ret_val = dm_i2c_write(dev, BRANE_DEV_I2C_REGISTER_ADDR, (uint8_t *)&write_val,
++                        BRANE_DEV_REGISTER_BYTE_SIZE);
++   if( ret_val ) {
++      return ret_val;
++   }
++
++   return 0;
++}
++
++void reset_speaker(void)
++{
++   write_to_device_i2c(BRANE_DEV_DUAL_CORE_REG_0_ADDR, BRANE_DEV_RESET_BIT);
++}
++
++void reset_cpu(void)
++{
++   reset_speaker();
++}
++
++uint32_t check_for_watchdog_timeout(void)
++{
++   uint32_t watchdog_val;
++   static uint32_t checked_for_timeout = false;
++   static uint32_t had_timeout = false;
++
++   if( !checked_for_timeout ) {
++      if( !read_from_device_i2c(BRANE_DEV_WATCHDOG_REG_ADDR, &watchdog_val) ) {
++         if( watchdog_val & BRANE_DEV_WATCHDOG_ERROR_BIT ) {
++            write_to_device_i2c(BRANE_DEV_WATCHDOG_REG_ADDR, BRANE_DEV_WATCHDOG_CLEAR_BIT);
++            had_timeout = true;
++         }
++      }
++      checked_for_timeout = true;
++   }
++
++   return had_timeout;
++}
++
++void arm_watchdog_timeout(uint32_t timeout_in_ms)
++{
++   if( timeout_in_ms > BRANE_DEV_WATCHDOG_TIME_BITS ) {
++      timeout_in_ms = BRANE_DEV_WATCHDOG_TIME_BITS;
++   }
++   write_to_device_i2c(BRANE_DEV_WATCHDOG_REG_ADDR,  (BRANE_DEV_WATCHDOG_CLEAR_BIT
++                                             | BRANE_DEV_WATCHDOG_ENABLE_BIT
++                                             | timeout_in_ms) );
++}
++
++
++int32_t write_scratchpad(uint32_t val_to_write)
++{
++   return write_to_device_i2c(BRANE_DEV_SCRATCHPAD_REG_ADDR,  val_to_write );
++}
++
++int32_t read_scratchpad(uint32_t *val_read)
++{
++   return read_from_device_i2c(BRANE_DEV_SCRATCHPAD_REG_ADDR,  val_read );
++}
+diff --git a/board/brane/ctrl1/brane-device.h b/board/brane/ctrl1/brane-device.h
+new file mode 100644
+index 0000000000..c11645d2c8
+--- /dev/null
++++ b/board/brane/ctrl1/brane-device.h
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#ifndef __BRANE_DEVICE_H__
++#define __BRANE_DEVICE_H__
++
++#define BRANE_DEV_I2C_BUS_NUM            2
++#define BRANE_DEV_I2C_CHIP_OFFSET_LEN    0
++#define BRANE_DEV_I2C_REGISTER_ADDR      0
++#define BRANE_DEV_REGISTER_BYTE_SIZE     4
++#define BRANE_DEV_MAX_ADDR               0x7F
++
++#define BRANE_DEV_DUAL_CORE_REG_0_ADDR   0x60
++#define BRANE_DEV_RESET_BIT              0x01
++
++#define BRANE_DEV_SCRATCHPAD_REG_ADDR    0x79
++#define NO_MOUNT_COMMON_PARTITION   0x80000000
++#define PART_3_HAB_CHECK_FAILED     0x40000000
++#define PART_2_HAB_CHECK_FAILED     0x20000000
++#define LAST_TRIED_PARTITION_MASK   0x03000000
++#define TOTAL_ATTEMPTS_MASK         0x0000FF00
++#define PARTITION_3_ATTEMPTS_MASK   0x000000F0
++#define PARTITION_2_ATTEMPTS_MASK   0x0000000F
++
++#define LAST_TRIED_PARTITION_SHIFT  24
++#define TOTAL_ATTEMPTS_SHIFT        8
++#define PARTITION_3_ATTEMPTS_SHIFT  4
++#define PARTITION_2_ATTEMPTS_SHIFT  0
++
++#define PARTITION_MAX_ATTEMPTS      0xFF
++
++#define BRANE_DEV_WATCHDOG_REG_ADDR      0x7C
++#define BRANE_DEV_WATCHDOG_ERROR_BIT     0x80000000
++#define BRANE_DEV_WATCHDOG_CLEAR_BIT     0x80000000
++#define BRANE_DEV_WATCHDOG_ENABLE_BIT    0x40000000
++#define BRANE_DEV_WATCHDOG_TIME_BITS     0x00FFFFFF
++
++// Function prototypes
++extern void reset_speaker(void);
++extern uint32_t check_for_watchdog_timeout(void);
++extern void arm_watchdog_timeout(uint32_t timeout_in_ms);
++extern int32_t write_scratchpad(uint32_t val_to_write);
++extern int32_t read_scratchpad(uint32_t *val_read);
++
++#endif
+diff --git a/board/brane/ctrl1/brane-file.c b/board/brane/ctrl1/brane-file.c
+new file mode 100644
+index 0000000000..fb421d8508
+--- /dev/null
++++ b/board/brane/ctrl1/brane-file.c
+@@ -0,0 +1,241 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <asm/arch/imx-regs.h>
++#include <common.h>
++#include <part.h>
++#include <ext4fs.h>
++#include <fs.h>
++#include <lmb.h>
++#include <asm/global_data.h>
++#include "brane-work.h"
++
++DECLARE_GLOBAL_DATA_PTR;
++
++#define BRANE_WRITE_FROM_ADDRESS (DEV_TREE_LOAD_ADDRESS - 0x4000)
++
++#define BRANE_FILE_SIZE          sizeof(uint32_t)
++
++int32_t write_4_byte_file(const char *file_name, uint32_t value_to_write)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   uint32_t close_ext4 = false;
++   struct blk_desc *dev_desc = NULL;
++   struct disk_partition info;
++   const char *ifname = BRANE_DEV_TYPE;
++   const char *dev_and_part = COMMON_DEV_AND_PART;
++   int ret;
++
++   if( !file_name || !strlen(file_name) ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++
++   ret = blk_get_device_part_str(ifname, dev_and_part,
++                  &dev_desc, &info, 1);
++   if (ret < 0) {
++      ret_val = BRANE_INVALID_PARTITION;
++      goto write_file_exit;
++   }
++
++   close_ext4 = true;
++
++	ext4fs_set_blk_dev(dev_desc, &info);
++	if( !ext4fs_mount(info.size) ) {
++      ret_val = BRANE_MOUNT_ERR;
++      goto write_file_exit;
++	}
++
++   writel(value_to_write, BRANE_WRITE_FROM_ADDRESS);
++	ret = ext4fs_write(file_name, (void *)BRANE_WRITE_FROM_ADDRESS, 
++                           sizeof(uint32_t), FILETYPE_REG);
++   if( ret != 0 ) {
++      ret_val = BRANE_FILE_NOT_WRITTEN;
++      goto write_file_exit;
++   }
++
++write_file_exit:
++   if( close_ext4 ) {
++		ext4fs_close();
++   }
++
++   return ret_val;
++}
++
++int32_t read_4_byte_file(const char *file_name, uint32_t *value_read)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   uint32_t close_ext4 = false;
++   uint32_t file_data = 0;
++   struct blk_desc *dev_desc = NULL;
++   struct disk_partition info;
++   const char *ifname = BRANE_DEV_TYPE;
++   const char *dev_and_part = COMMON_DEV_AND_PART;
++   loff_t file_len = 0;
++   loff_t num_read = 0;
++   int ret;
++
++   if( !file_name || !value_read || !strlen(file_name) ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++   
++   *value_read = 0;
++
++   ret = blk_get_device_part_str(ifname, dev_and_part,
++                  &dev_desc, &info, 1);
++   if (ret < 0) {
++      ret_val = BRANE_INVALID_PARTITION;
++      goto read_file_exit;
++   }
++
++   close_ext4 = true;
++
++	ext4fs_set_blk_dev(dev_desc, &info);
++	if( !ext4fs_mount(info.size) ) {
++      ret_val = BRANE_MOUNT_ERR;
++      goto read_file_exit;
++	}
++
++	ret = ext4fs_open(file_name, &file_len);
++   if( ret != 0 ) {
++      ret_val = BRANE_FILE_NOT_FOUND;
++      goto read_file_exit;
++   }
++   if( file_len != BRANE_FILE_SIZE ) {
++      ret_val = BRANE_INVALID_LENGTH;
++      goto read_file_exit;
++   }
++
++   ret = ext4fs_read( (char *)&file_data, 0, BRANE_FILE_SIZE, &num_read );
++   if( ret ) {
++      ret_val = BRANE_FILE_NOT_READ;
++      goto read_file_exit;
++   }
++   if( num_read != BRANE_FILE_SIZE ) {
++      ret_val = BRANE_INVALID_LENGTH;
++      goto read_file_exit;
++   }
++
++   *value_read = file_data;
++
++read_file_exit:
++   if( close_ext4 ) {
++		ext4fs_close();
++   }
++
++   return ret_val;
++}
++
++int32_t check_file_exists(const char *file_name, const char *dev_and_part, uint32_t *exists, uint32_t *size)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   uint32_t close_ext4 = false;
++   struct blk_desc *dev_desc = NULL;
++   struct disk_partition info;
++   const char *ifname = BRANE_DEV_TYPE;
++   loff_t file_len = 0;
++   int ret;
++
++   if( !file_name || !exists || !strlen(file_name) ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++   
++   *exists = false;
++
++   ret = blk_get_device_part_str(ifname, dev_and_part,
++                  &dev_desc, &info, 1);
++   if (ret < 0) {
++      ret_val = BRANE_INVALID_PARTITION;
++      goto file_exists_exit;
++   }
++
++   close_ext4 = true;
++
++	ext4fs_set_blk_dev(dev_desc, &info);
++	if( !ext4fs_mount(info.size) ) {
++      ret_val = BRANE_MOUNT_ERR;
++      goto file_exists_exit;
++	}
++
++	ret = ext4fs_open(file_name, &file_len);
++   if( ret == 0 ) {
++      *exists = true;
++      if( size ) {
++         *size = (uint32_t)file_len;
++      }
++   }
++
++file_exists_exit:
++   if( close_ext4 ) {
++		ext4fs_close();
++   }
++
++   return ret_val;
++}
++
++int32_t read_file_into_memory(const char *file_name, const char *dev_and_part, uint32_t mem_addr)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   uint32_t close_ext4 = false;
++	struct lmb lmb;
++   struct blk_desc *dev_desc = NULL;
++   struct disk_partition info;
++   const char *ifname = BRANE_DEV_TYPE;
++   loff_t file_len = 0;
++   loff_t num_read = 0;
++   int ret;
++
++   if( !file_name || !strlen(file_name) ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++   
++   ret = blk_get_device_part_str(ifname, dev_and_part,
++                  &dev_desc, &info, 1);
++   if (ret < 0) {
++      ret_val = BRANE_INVALID_PARTITION;
++      goto read_file_mem_exit;
++   }
++
++   close_ext4 = true;
++
++	ext4fs_set_blk_dev(dev_desc, &info);
++	if( !ext4fs_mount(info.size) ) {
++      ret_val = BRANE_MOUNT_ERR;
++      goto read_file_mem_exit;
++	}
++
++	ret = ext4fs_open(file_name, &file_len);
++   if( ret ) {
++      ret_val = BRANE_FILE_NOT_FOUND;
++      goto read_file_mem_exit;
++   }
++   if( !file_len ) {
++      goto read_file_mem_exit;
++   }
++
++	lmb_init_and_reserve(&lmb, gd->bd, (void *)gd->fdt_blob);
++	if (lmb_alloc_addr(&lmb, mem_addr, file_len) != mem_addr) {
++      ret_val = BRANE_BAD_MEMORY_LOC;
++      goto read_file_mem_exit;
++   }
++
++   ret = ext4fs_read( (char *)mem_addr, 0, file_len, &num_read );
++   if( ret ) {
++      ret_val = BRANE_FILE_NOT_READ;
++      goto read_file_mem_exit;
++   }
++   if( num_read != file_len ) {
++      ret_val = BRANE_INVALID_LENGTH;
++      goto read_file_mem_exit;
++   }
++
++read_file_mem_exit:
++   if( close_ext4 ) {
++		ext4fs_close();
++   }
++
++   return ret_val;
++}
++
+diff --git a/board/brane/ctrl1/brane-srk.c b/board/brane/ctrl1/brane-srk.c
+new file mode 100644
+index 0000000000..c98c8d814e
+--- /dev/null
++++ b/board/brane/ctrl1/brane-srk.c
+@@ -0,0 +1,226 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <asm/arch/imx-regs.h>
++#include <common.h>
++#include <part.h>
++#include <ext4fs.h>
++#include <fs.h>
++#include <fuse.h>
++#include "brane-work.h"
++
++/* INSERT_SRK_IN_USE */
++#define SRK_IN_USE            0
++#define MAX_SRK_VALUE         3
++
++#define PART_2_SRK_IN_USE_FILE      "SRK_two"
++#define PART_3_SRK_IN_USE_FILE      "SRK_three"
++
++#define SPEAKER_MAIN_BLOW_SRK_FILE  "SRK_destroy"
++
++#define U_BOOT_BLOWN_SRK_FILE             "/SRK_done"
++#define FUSES_BLOWN_SUCCESS               0
++#define FUSES_BLOWN_FAIL_U_BOOT_SRK       1
++#define FUSES_BLOWN_BAD_FILE              2
++#define FUSES_BLOWN_FAIL_NO_PERMISSION    3
++#define FUSES_BLOWN_FAIL_BAD_SHADOW_READ  4
++#define FUSES_BLOWN_FAIL_BLOW_FUSE        5
++
++#define STICKY_BIT_SRK_REVOKE_LOCK  0x00000002
++
++#define SRK_BANK              9
++#define SRK_WORD              3 
++
++#define SRK_REVOKE_FUSE_0           0x00000001
++#define SRK_REVOKE_FUSE_1           0x00000002
++#define SRK_REVOKE_FUSE_2           0x00000004
++#define ALL_SRK_REVOKE_FUSES        (  SRK_REVOKE_FUSE_0 \
++                                     | SRK_REVOKE_FUSE_1 \
++                                     | SRK_REVOKE_FUSE_2 )
++
++/* INSERT_BLOWABLE_SRK */
++#define BLOWABLE_SRK_FUSES          0
++
++uint32_t srk_in_use_part_2 = 0;
++uint32_t srk_in_use_part_3 = 0;
++
++static void create_fuse_blown_file(uint32_t blown_fuse_val)
++{
++   const char *fuse_blown_file = U_BOOT_BLOWN_SRK_FILE;
++   write_4_byte_file( fuse_blown_file, blown_fuse_val );
++}
++
++static int32_t read_rootfs_srk_in_use_file(const char *file_name, uint32_t *srk_in_use)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   int ret;
++
++   if( !srk_in_use ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++   *srk_in_use = 0;
++
++   if( !file_name || !strlen(file_name) ) {
++      return BRANE_SUCCESS;
++   }
++
++   ret = read_4_byte_file( file_name, srk_in_use );
++   if( ret != 0 ) {
++      *srk_in_use = 0;
++
++      switch( ret ) {
++         case BRANE_INVALID_PARTITION:
++         case BRANE_MOUNT_ERR:
++            ret_val = ret;
++            break;
++         default:
++            break;
++      }
++   } else if( *srk_in_use > MAX_SRK_VALUE ) {
++      *srk_in_use = 0;
++   }
++
++   return ret_val;
++}
++
++static int32_t read_rootfs_srk_in_use_files(void)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   const char *rootfs_part_2_file = PART_2_SRK_IN_USE_FILE;
++   const char *rootfs_part_3_file = PART_3_SRK_IN_USE_FILE;
++
++   ret_val = read_rootfs_srk_in_use_file( rootfs_part_2_file, &srk_in_use_part_2 );
++   if( !ret_val ) {
++      ret_val = read_rootfs_srk_in_use_file( rootfs_part_3_file, &srk_in_use_part_3 );
++   } else {
++      srk_in_use_part_3 = 0;
++   }
++   return ret_val;
++}
++
++static int32_t read_blow_fuses_file_for_fuses_to_blow(uint32_t *fuses_to_blow)
++{
++   int32_t ret_val = BRANE_SUCCESS;
++   const char *blow_fuse_file = SPEAKER_MAIN_BLOW_SRK_FILE;
++   int ret;
++
++   if( !fuses_to_blow ) {
++      return BRANE_INVALID_ARGUMENT;
++   }
++   
++   ret = read_4_byte_file( blow_fuse_file, fuses_to_blow );
++   if( ret != 0 ) {
++      switch( ret ) {
++         case BRANE_INVALID_LENGTH:
++         case BRANE_FILE_NOT_READ:
++            ret_val = BRANE_BAD_FUSE_FILE;
++            break;
++         default:
++            *fuses_to_blow = 0;
++            ret_val = BRANE_SUCCESS;
++            break;
++      }
++      goto read_fuse_exit;
++   }
++
++   *fuses_to_blow &= ALL_SRK_REVOKE_FUSES;
++   if( !(*fuses_to_blow) ) {
++      ret_val = BRANE_BAD_FUSE_FILE;
++   }
++
++read_fuse_exit:
++   return ret_val;
++}
++
++void do_srk_work(void)
++{
++	struct ocotp_regs *regs = (struct ocotp_regs *)OCOTP_BASE_ADDR;
++   uint32_t sticky_bits;
++   uint32_t current_blown_srks;
++   uint32_t want_blow_fuses;
++   uint32_t srk_blow_mask = (BLOWABLE_SRK_FUSES & ALL_SRK_REVOKE_FUSES);
++   uint32_t srk_u_boot_using = (1 << SRK_IN_USE);
++   uint32_t create_blown_file = false;
++   uint32_t blown_fuse_val = FUSES_BLOWN_SUCCESS;
++   int32_t ret;
++
++   if( read_rootfs_srk_in_use_files() ) {
++      return; 
++   }
++
++
++   sticky_bits = readl(&regs->sw_sticky);
++   if( sticky_bits & STICKY_BIT_SRK_REVOKE_LOCK ) {
++      return;
++   }
++
++   if( SRK_IN_USE > MAX_SRK_VALUE ) {
++      return;
++   }
++
++   if( !srk_blow_mask ) {
++      goto do_srk_exit;
++   }
++
++   if( secondary_running ) {
++      goto do_srk_exit;
++   }
++
++   ret = read_blow_fuses_file_for_fuses_to_blow(&want_blow_fuses);
++   if( ret ) {
++      if( ret == BRANE_BAD_FUSE_FILE) {
++         blown_fuse_val = FUSES_BLOWN_BAD_FILE;
++         create_blown_file = true;
++      }
++      goto do_srk_exit;
++   }
++
++   if( !want_blow_fuses ) {
++      goto do_srk_exit;
++   }
++
++   create_blown_file = true;
++
++   if( srk_u_boot_using & want_blow_fuses ) {
++      blown_fuse_val = FUSES_BLOWN_FAIL_U_BOOT_SRK;
++      goto do_srk_exit;
++   }
++
++   if( want_blow_fuses & ~srk_blow_mask ) {
++      blown_fuse_val = FUSES_BLOWN_FAIL_NO_PERMISSION;
++      goto do_srk_exit;
++   }
++
++   if( fuse_read(SRK_BANK, SRK_WORD, &current_blown_srks) ) {
++      blown_fuse_val = FUSES_BLOWN_FAIL_BAD_SHADOW_READ;
++      goto do_srk_exit;
++   }
++
++   srk_blow_mask &= ~current_blown_srks;
++   if( !srk_blow_mask ) {
++      goto do_srk_exit;
++   }
++
++   srk_blow_mask &= want_blow_fuses;
++   if( !srk_blow_mask ) {
++      goto do_srk_exit;
++   }
++
++   ret = fuse_prog(SRK_BANK, SRK_WORD, srk_blow_mask);
++   if( ret ) {
++      blown_fuse_val = FUSES_BLOWN_FAIL_BLOW_FUSE;
++   }
++
++do_srk_exit:
++   if( create_blown_file ) {
++      create_fuse_blown_file(blown_fuse_val);
++   }
++
++   writel(STICKY_BIT_SRK_REVOKE_LOCK, &regs->sw_sticky);
++
++	return;
++}
++
+diff --git a/board/brane/ctrl1/brane-work.c b/board/brane/ctrl1/brane-work.c
+new file mode 100644
+index 0000000000..f1d2813611
+--- /dev/null
++++ b/board/brane/ctrl1/brane-work.c
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <command.h>
++#include "brane-work.h"
++
++static void set_all_ver_env_vars(void) {
++   char tmp_str[MAX_ENV_STR_LEN];
++
++   env_set("mmcdev", BRANE_MMC_DEV);
++
++   snprintf(tmp_str, MAX_ENV_STR_LEN, "0x%X", KERNEL_LOAD_ADDRESS );
++   env_set("loadaddr", tmp_str);
++
++   snprintf(tmp_str, MAX_ENV_STR_LEN, "0x%X", DEV_TREE_LOAD_ADDRESS );
++   env_set("fdt_addr", tmp_str);
++}
++
++static int do_brane_work(struct cmd_tbl *cmdtp, int flag, int argc,
++			  char *const argv[])
++{
++
++   set_all_ver_env_vars();
++
++#if defined(CONFIG_TARGET_BRANE_CTRL1) || defined(CONFIG_TARGET_BRANE_CTRL1_FIXTURE)
++   do_srk_work();
++
++   if( argc == 2 ) {
++      prep_for_boot(false);
++   } else {
++      prep_for_boot(true);
++   }
++
++#elif defined(CONFIG_TARGET_BRANE_CTRL1_CALDRAM)
++   prep_for_boot(false);
++#endif
++
++	return 0;
++}
++
++U_BOOT_CMD(
++   brane_work, 2, 0, do_brane_work,
++   "Handle Brane Stuff",
++   "Any Second Argument Disables Watchdog"
++);
+diff --git a/board/brane/ctrl1/brane-work.h b/board/brane/ctrl1/brane-work.h
+new file mode 100644
+index 0000000000..d8ef2949dd
+--- /dev/null
++++ b/board/brane/ctrl1/brane-work.h
+@@ -0,0 +1,50 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#ifndef __BRANE_WORK_H__
++#define __BRANE_WORK_H__
++
++#include <asm/io.h>
++#include "brane-device.h"
++
++#define BRANE_SUCCESS             0
++#define BRANE_INVALID_ARGUMENT   -1
++#define BRANE_INVALID_PARTITION  -2
++#define BRANE_MOUNT_ERR          -3
++#define BRANE_FILE_NOT_FOUND     -4
++#define BRANE_INVALID_LENGTH     -5
++#define BRANE_FILE_NOT_READ      -6
++#define BRANE_FILE_NOT_WRITTEN   -7
++#define BRANE_BAD_FUSE_FILE      -8
++#define BRANE_BAD_MEMORY_LOC     -9
++
++#define BRANE_FILE_SIZE          sizeof(uint32_t)
++
++#define BRANE_DEV_TYPE  "mmc"
++
++#define BRANE_MMC_DEV            "2"
++#define COMMON_DEV_AND_PART      "2:1"
++#define PART_TWO_DEV_AND_PART    "2:2"
++#define PART_THREE_DEV_AND_PART  "2:3"
++
++#define KERNEL_LOAD_ADDRESS   CONFIG_SYS_LOAD_ADDR
++#define DEV_TREE_LOAD_ADDRESS 0x83000000
++
++#define KERNEL_IMAGE    "/boot/zImage"
++#define KERNEL_DEV_TREE "/boot/brane_ctrl1.dtb"
++
++#define MAX_ENV_STR_LEN          512
++
++extern uint32_t secondary_running;
++
++extern void prep_for_boot(uint32_t set_watchdog);
++extern int32_t write_4_byte_file(const char *file_name, uint32_t value_to_write);
++extern int32_t read_4_byte_file(const char *file_name, uint32_t *value_read);
++extern int32_t check_file_exists(const char *file_name, const char *dev_and_part, uint32_t *exists, uint32_t *size);
++extern int32_t read_file_into_memory(const char *file_name, const char *dev_and_part, uint32_t mem_addr);
++extern void do_srk_work(void);
++
++#endif
+diff --git a/board/brane/ctrl1/imximage.cfg b/board/brane/ctrl1/imximage.cfg
+new file mode 100644
+index 0000000000..51ec21b3c5
+--- /dev/null
++++ b/board/brane/ctrl1/imximage.cfg
+@@ -0,0 +1,104 @@
++// Copyright (C) 2023 Brane Audio
++//
++// SPDX-License-Identifier: GPL-2.0
++
++// Refer doc/imx/mkimage/imximage.txt for more details about how-to configure
++// and create imximage boot image
++//
++// The syntax is taken as close as possible with the kwbimage
++
++#include <config.h>
++
++// image version
++IMAGE_VERSION 2
++
++// Boot device: nand/spi/sd/onenand/nor/sata
++BOOT_FROM sd
++
++#ifdef CONFIG_IMX_HAB
++// secure boot support
++CSF CONFIG_CSF_SIZE
++#endif
++
++// Device Configuration Data (DCD)
++//
++// Each entry must have the format:
++//   Addr-type   Address   Value
++//
++// where:
++//   Addr-type: register length (1,2 or 4 bytes)
++//   Address:   absolute address of the register
++//   Value:     value to be stored in the register
++
++#ifdef CONFIG_IMX_OPTEE
++DATA 4 0x30340024 0x00000001
++CHECK_BITS_SET 4 0x30340024 0x1
++#endif
++
++
++#if !defined(CONFIG_TARGET_BRANE_CTRL1_CALDRAM)
++DATA 4 0x30360074 0x00100000
++CHECK_BITS_CLR 4 0x30360070 0x80000000
++DATA 4 0x30360090 0x00002710
++DATA 4 0x303600A0 0x00005DC0
++DATA 4 0x30360080 0x4E20800A
++DATA 4 0x30360078 0x00100000
++CHECK_BITS_SET 4 0x30360070 0x80000000
++#endif
++
++DATA 4 0x30340004 0x4F400005
++DATA 4 0x30360388 0x40000000
++DATA 4 0x30360384 0x40000000
++DATA 4 0x30391000 0x00000002
++DATA 4 0x307a0000 0x01040001
++DATA 4 0x307a01a0 0x80400003
++DATA 4 0x307a01a4 0x00100020
++DATA 4 0x307a01a8 0x80100004
++DATA 4 0x307a0064 0x00400046
++DATA 4 0x307a0490 0x00000001
++DATA 4 0x307a00d0 0x00020083
++DATA 4 0x307a00d4 0x00690000
++DATA 4 0x307a00dc 0x09300004
++DATA 4 0x307a00e0 0x04080000
++DATA 4 0x307a00e4 0x00100004
++DATA 4 0x307a00f4 0x0000033f
++DATA 4 0x307a0100 0x09081109
++DATA 4 0x307a0104 0x0007020d
++DATA 4 0x307a0108 0x03040407
++DATA 4 0x307a010c 0x00002006
++DATA 4 0x307a0110 0x04020205
++DATA 4 0x307a0114 0x03030202
++DATA 4 0x307a0120 0x00000803
++DATA 4 0x307a0180 0x00800020
++DATA 4 0x307a0184 0x02000100
++DATA 4 0x307a0190 0x02098204
++DATA 4 0x307a0194 0x00030303
++DATA 4 0x307a0200 0x00000016
++DATA 4 0x307a0204 0x00080808
++DATA 4 0x307a0210 0x00000f0f
++DATA 4 0x307a0214 0x07070707
++DATA 4 0x307a0218 0x0f070707
++DATA 4 0x307a0240 0x06000604
++DATA 4 0x307a0244 0x00000001
++DATA 4 0x30391000 0x00000000
++DATA 4 0x30790000 0x17420f40
++DATA 4 0x30790004 0x10210100
++DATA 4 0x30790010 0x00060807
++DATA 4 0x307900b0 0x1010007e
++DATA 4 0x3079009c 0x00000b24
++DATA 4 0x30790020 0x0A0A0A0A
++DATA 4 0x30790030 0x04040404
++DATA 4 0x30790050 0x01000010
++DATA 4 0x30790050 0x00000010
++DATA 4 0x307900c0 0x0e407304
++DATA 4 0x307900c0 0x0e447304
++DATA 4 0x307900c0 0x0e447306
++CHECK_BITS_SET 4 0x307900c4 0x1
++DATA 4 0x307900c0 0x0e407304
++DATA 4 0x30384130 0x00000000
++DATA 4 0x30340020 0x00000178
++DATA 4 0x30384130 0x00000002
++DATA 4 0x30790018 0x0000000f
++CHECK_BITS_SET 4 0x307a0004 0x1
++
++//------------------------------------------------------------------------------
+diff --git a/include/configs/brane-ctrl1.h b/include/configs/brane-ctrl1.h
+new file mode 100644
+index 0000000000..4e5b88a9c8
+--- /dev/null
++++ b/include/configs/brane-ctrl1.h
+@@ -0,0 +1,100 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#ifndef __BRANE_CTRL1_CONFIG_H
++#define __BRANE_CTRL1_CONFIG_H
++
++#include <linux/sizes.h>
++#include <asm/arch/imx-regs.h>
++#include <asm/mach-imx/gpio.h>
++
++#define CONFIG_SYS_MMC_ENV_DEV      2
++
++/* INSERT_AUTOGEN_CODE */
++#define BRANE_UBOOT_VER_STR "u-boot-fslc_v1111.01+gr-ffffffffff+br-1111111+1000000000"
++
++#ifndef CONFIG_MX7
++#define CONFIG_MX7
++#endif
++
++#define CONFIG_MXC_GPT_HCLK
++#define CONFIG_SC_TIMER_CLK            8000000
++#define COUNTER_FREQUENCY              CONFIG_SC_TIMER_CLK
++#define CONFIG_SYS_BOOTM_LEN           0x1000000
++
++#define CONFIG_IOMUX_LPSR
++
++#define CONFIG_ENV_OVERWRITE
++#define CONFIG_CONS_INDEX              1
++
++#define CONFIG_SYS_CBSIZE              2048
++#define CONFIG_SYS_MAXARGS             32
++#define CONFIG_SYS_BARGSIZE            CONFIG_SYS_CBSIZE
++
++#define CONFIG_MXC_UART
++#define CONFIG_MXC_UART_BASE           UART1_IPS_BASE_ADDR
++
++#define CONFIG_BOUNCE_BUFFER
++
++#define CONFIG_ARMV7_SECURE_BASE       0x00900000
++
++#define CONFIG_SYS_FSL_ESDHC_ADDR      0
++#define MMC_SUPPORTS_TUNING
++#define CONFIG_SYS_FSL_ESDHC_HAS_DDR_MODE
++
++#define CONFIG_SYS_I2C_SPEED           100000
++
++#define CONFIG_MFG_ENV_SETTINGS \
++	"initrd_addr=0x83800000\0" \
++	"initrd_high=0xffffffff\0" \
++
++#if defined(CONFIG_TARGET_BRANE_CTRL1_FIXTURE)
++   #define BRANE_SETTINGS \
++      "console=ttymxc0\0" \
++      "silent=0\0"
++#elif defined(CONFIG_TARGET_BRANE_CTRL1_BRINGUP)
++   #define BRANE_SETTINGS \
++      "console=ttymxc0\0" \
++      "silent=0\0"        \
++      "bootcmd_mfg=brane_work; ums 0 mmc ${mmcdev}\0"
++#else
++   #define BRANE_SETTINGS \
++      "console=ttymxc0\0" \
++      "silent=0\0"
++#endif
++
++#define CONFIG_EXTRA_ENV_SETTINGS \
++   CONFIG_MFG_ENV_SETTINGS \
++   BRANE_SETTINGS \
++   "fdt_high=0xffffffff\0" \
++   "mmcboot=echo Booting from mmc ...; " \
++      "bootz ${loadaddr} - ${fdt_addr}; \0" \
++
++#define CONFIG_BOOTCOMMAND "brane_work; run mmcboot; "
++
++#define CONFIG_SYS_MEMTEST_START    0x80000000
++#define CONFIG_SYS_MEMTEST_END      (CONFIG_SYS_MEMTEST_START + 0x20000000)
++#define CONFIG_SYS_HZ               1000
++
++#define PHYS_SDRAM_SIZE             SZ_512M
++#define CONFIG_NR_DRAM_BANKS        1
++#define PHYS_SDRAM                  MMDC0_ARB_BASE_ADDR
++#define CONFIG_SYS_SDRAM_BASE       PHYS_SDRAM
++#define CONFIG_SYS_INIT_RAM_ADDR    IRAM_BASE_ADDR
++#define CONFIG_SYS_INIT_RAM_SIZE    IRAM_SIZE
++#define CONFIG_SYS_INIT_SP_OFFSET   (CONFIG_SYS_INIT_RAM_SIZE - GENERATED_GBL_DATA_SIZE)
++#define CONFIG_SYS_INIT_SP_ADDR     (CONFIG_SYS_INIT_RAM_ADDR + CONFIG_SYS_INIT_SP_OFFSET)
++
++#define CONFIG_ENV_OFFSET           (12 * SZ_64K)
++#define CONFIG_SYS_FSL_USDHC_NUM    2
++
++#define CONFIG_SYS_MMC_ENV_PART     0
++
++#define CONFIG_MXC_USB_PORTSC       (PORT_PTS_UTMI | PORT_PTS_PTW)
++#define CONFIG_IMX_THERMAL
++#define CONFIG_USBD_HS
++
++#endif /* __BRANE_CTRL1_CONFIG_H */
+-- 
+2.34.1
+

@@ -1,0 +1,123 @@
+From 804fcb28e8f5cffd14067656bceb3213db761681 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Mon, 13 Nov 2023 11:14:07 -0600
+Subject: [PATCH] add a2dp delay reporting
+
+---
+ profiles/audio/a2dp.c      |  6 ++++++
+ profiles/audio/avdtp.c     |  7 +++++++
+ profiles/audio/media.c     |  6 ++++++
+ profiles/audio/transport.c | 31 +++++++++++++++++++++++++++++--
+ 4 files changed, 48 insertions(+), 2 deletions(-)
+
+diff --git a/profiles/audio/a2dp.c b/profiles/audio/a2dp.c
+index 47b5dd7c3..2790f201a 100644
+--- a/profiles/audio/a2dp.c
++++ b/profiles/audio/a2dp.c
+@@ -2041,6 +2041,12 @@ static gboolean get_device(const GDBusPropertyTable *property,
+ 	return TRUE;
+ }
+ 
++// BRANE: add delay reporting (transport -> media -> a2dp -> avdtp)
++void brane_a2dp_sep_set_delay(struct a2dp_sep *sep, uint16_t delay)
++{
++   brane_avdtp_set_delay(sep->stream, delay);
++}
++
+ static gboolean get_delay_reporting(const GDBusPropertyTable *property,
+ 					DBusMessageIter *iter, void *data)
+ {
+diff --git a/profiles/audio/avdtp.c b/profiles/audio/avdtp.c
+index 10ef380d4..306799600 100644
+--- a/profiles/audio/avdtp.c
++++ b/profiles/audio/avdtp.c
+@@ -3311,6 +3311,13 @@ struct avdtp_service_capability *avdtp_get_codec(struct avdtp_remote_sep *sep)
+ 	return sep->codec;
+ }
+ 
++// BRANE: enable delay reporting
++void brane_avdtp_set_delay(struct avdtp_stream *stream, uint16_t delay)
++{
++   stream->delay = delay;
++   avdtp_delay_report(stream->session, stream, stream->delay);
++}
++
+ bool avdtp_get_delay_reporting(struct avdtp_remote_sep *sep)
+ {
+ 	return sep->delay_reporting;
+diff --git a/profiles/audio/media.c b/profiles/audio/media.c
+index c9328ab9b..a1dcba2d9 100644
+--- a/profiles/audio/media.c
++++ b/profiles/audio/media.c
+@@ -126,6 +126,12 @@ struct media_player {
+ 	char			*name;
+ };
+ 
++// BRANE: add delay reporting (transport -> media -> a2dp -> avdtp)
++void brane_media_set_delay(struct media_endpoint *endpoint, uint16_t delay)
++{
++   brane_a2dp_sep_set_delay(endpoint->sep, delay);
++}
++
+ static GSList *adapters = NULL;
+ 
+ static void endpoint_request_free(struct endpoint_request *request)
+diff --git a/profiles/audio/transport.c b/profiles/audio/transport.c
+index 41339da51..ae6fbbb9b 100644
+--- a/profiles/audio/transport.c
++++ b/profiles/audio/transport.c
+@@ -695,7 +695,31 @@ static gboolean delay_reporting_exists(const GDBusPropertyTable *property,
+ 	struct media_transport *transport = data;
+ 	struct a2dp_transport *a2dp = transport->data;
+ 
+-	return a2dp->delay != 0;
++	// BRANE: force true to enable delay reporting
++	return TRUE;
++	//return a2dp->delay != 0;
++}
++
++// BRANE: add delay reporting
++static void set_delay(const GDBusPropertyTable *property,
++			DBusMessageIter *iter, GDBusPendingPropertySet id,
++			void *data)
++{
++	struct media_transport *transport = data;
++	struct a2dp_transport *a2dp = transport->data;
++	uint16_t delay;
++
++	if (dbus_message_iter_get_arg_type(iter) != DBUS_TYPE_UINT16) {
++		g_dbus_pending_property_error(id,
++				ERROR_INTERFACE ".InvalidArguments",
++				"Expected UINT16");
++		return;
++	}
++
++	dbus_message_iter_get_basic(iter, &delay);
++	media_transport_update_delay(transport, delay);
++	g_dbus_pending_property_success(id);
++	return;
+ }
+ 
+ static gboolean get_delay_reporting(const GDBusPropertyTable *property,
+@@ -808,7 +832,7 @@ static const GDBusPropertyTable a2dp_properties[] = {
+ 	{ "Codec", "y", get_codec },
+ 	{ "Configuration", "ay", get_configuration },
+ 	{ "State", "s", get_state },
+-	{ "Delay", "q", get_delay_reporting, NULL, delay_reporting_exists },
++	{ "Delay", "q", get_delay_reporting, set_delay, delay_reporting_exists }, // BRANE: add delay reporting
+ 	{ "Volume", "q", get_volume, set_volume, volume_exists },
+ 	{ "Endpoint", "o", get_endpoint, NULL, endpoint_exists,
+ 				G_DBUS_PROPERTY_FLAG_EXPERIMENTAL },
+@@ -1495,6 +1519,9 @@ void media_transport_update_delay(struct media_transport *transport,
+ 	g_dbus_emit_property_changed(btd_get_dbus_connection(),
+ 					transport->path,
+ 					MEDIA_TRANSPORT_INTERFACE, "Delay");
++
++	// BRANE: add delay reporting
++	brane_media_set_delay(transport->endpoint, delay);
+ }
+ 
+ struct btd_device *media_transport_get_dev(struct media_transport *transport)
+-- 
+2.34.1
+

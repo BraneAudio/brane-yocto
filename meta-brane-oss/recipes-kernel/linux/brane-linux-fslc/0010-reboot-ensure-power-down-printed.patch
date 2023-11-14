@@ -1,0 +1,34 @@
+From ee7464e677a4ad19340fbc18d8d839ba88aca479 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Fri, 20 Oct 2023 17:53:05 -0500
+Subject: [PATCH] reboot: ensure power down printed
+
+Want the kernel power down message to be printed to know when it
+is safe to remove power from the board.
+---
+ kernel/reboot.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/kernel/reboot.c b/kernel/reboot.c
+index 3bba88c7ffc6..a117af287d5c 100644
+--- a/kernel/reboot.c
++++ b/kernel/reboot.c
+@@ -675,6 +675,7 @@ EXPORT_SYMBOL_GPL(kernel_can_power_off);
+  *
+  *	Shutdown everything and perform a clean system power_off.
+  */
++#include <linux/delay.h> // BRANE: required for mdelay
+ void kernel_power_off(void)
+ {
+ 	kernel_shutdown_prepare(SYSTEM_POWER_OFF);
+@@ -683,6 +684,7 @@ void kernel_power_off(void)
+ 	syscore_shutdown();
+ 	pr_emerg("Power down\n");
+ 	kmsg_dump(KMSG_DUMP_SHUTDOWN);
++	mdelay(10); // BRANE: Try to ensure "power down" gets printed
+ 	machine_power_off();
+ }
+ EXPORT_SYMBOL_GPL(kernel_power_off);
+-- 
+2.34.1
+

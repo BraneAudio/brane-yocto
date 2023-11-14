@@ -1,0 +1,3 @@
+PACKAGECONFIG = "systemd \
+                 duktape \
+                "

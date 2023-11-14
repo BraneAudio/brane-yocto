@@ -1,0 +1,30 @@
+From 68ed45deb182feff54636641885477b4e4f27e4f Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Mon, 6 Nov 2023 11:40:47 -0600
+Subject: [PATCH] workaround iwlwifi firmware
+
+This patch works around a 60s delay in the iwlwifi driver where the
+initialization stalls due to a failed firmware load attempt.  The
+iwl-debug-yoyo.bin file does not exist and cannot be located; it
+appears to be unnecessary.  Kernel maintainers changed the code to
+make it fail silently, my change was to bypass it entirely.
+---
+ drivers/net/wireless/intel/iwlwifi/iwl-dbg-tlv.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/drivers/net/wireless/intel/iwlwifi/iwl-dbg-tlv.c b/drivers/net/wireless/intel/iwlwifi/iwl-dbg-tlv.c
+index a1d34f3e7a9f..e9497ee21c08 100644
+--- a/drivers/net/wireless/intel/iwlwifi/iwl-dbg-tlv.c
++++ b/drivers/net/wireless/intel/iwlwifi/iwl-dbg-tlv.c
+@@ -503,6 +503,8 @@ void iwl_dbg_tlv_load_bin(struct device *dev, struct iwl_trans *trans)
+ 	    trans->trans_cfg->device_family <= IWL_DEVICE_FAMILY_8000)
+ 		return;
+ 
++return; // BRANE: firmware_request_nowarn takes 60s to fail, just return
++
+ 	res = firmware_request_nowarn(&fw, yoyo_bin, dev);
+ 	IWL_DEBUG_FW(trans, "%s %s\n", res ? "didn't load" : "loaded", yoyo_bin);
+ 
+-- 
+2.34.1
+

@@ -1,0 +1,29 @@
+From c3f4293bcbb74817a4b52c5bb10166672ef76acb Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Tue, 17 Oct 2023 11:35:16 -0500
+Subject: [PATCH] hab update docs
+
+---
+ .../csf_examples/additional_images/csf_additional_images.txt  | 4 ++--
+ doc/imx/habv4/script_examples/genIVT.pl                       | 0
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+ mode change 100644 => 100755 doc/imx/habv4/script_examples/genIVT.pl
+
+diff --git a/doc/imx/habv4/csf_examples/additional_images/csf_additional_images.txt b/doc/imx/habv4/csf_examples/additional_images/csf_additional_images.txt
+index bbe489714b..225a0ed249 100644
+--- a/doc/imx/habv4/csf_examples/additional_images/csf_additional_images.txt
++++ b/doc/imx/habv4/csf_examples/additional_images/csf_additional_images.txt
+@@ -30,5 +30,5 @@
+     Verification index = 2
+     # Authenticate Start Address, Offset, Length and file
+     Blocks = 0x80800000 0x00000000 0x80EEA020 "zImage", \
+-	     0x83800000 0x00000000 0x8380B927 "imx7d-sdb.dtb", \
+-	     0x84000000 0x00000000 0x840425B8 "uTee-7dsdb"
++             0x83800000 0x00000000 0x0000B927 "imx7d-sdb.dtb", \
++             0x84000000 0x00000000 0x000425B8 "uTee-7dsdb"
+diff --git a/doc/imx/habv4/script_examples/genIVT.pl b/doc/imx/habv4/script_examples/genIVT.pl
+old mode 100644
+new mode 100755
+-- 
+2.34.1
+

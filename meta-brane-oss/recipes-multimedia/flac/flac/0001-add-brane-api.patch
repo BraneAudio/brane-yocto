@@ -1,0 +1,80 @@
+From 3aa2462d5014547de26b6edc9b24cf90bd854856 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Mon, 18 Sep 2023 15:11:03 -0500
+Subject: [PATCH] add brane api
+
+---
+ include/FLAC/stream_encoder.h |  4 ++++
+ src/libFLAC/stream_encoder.c  | 41 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 45 insertions(+)
+
+diff --git a/include/FLAC/stream_encoder.h b/include/FLAC/stream_encoder.h
+index a0d02639..d00ad11c 100644
+--- a/include/FLAC/stream_encoder.h
++++ b/include/FLAC/stream_encoder.h
+@@ -1828,6 +1828,10 @@ FLAC_API FLAC__bool FLAC__stream_encoder_process(FLAC__StreamEncoder *encoder, c
+  */
+ FLAC_API FLAC__bool FLAC__stream_encoder_process_interleaved(FLAC__StreamEncoder *encoder, const FLAC__int32 buffer[], uint32_t samples);
+ 
++// special version of FLAC__stream_encoder_process_interleaved that does not
++// 'OVERREAD_' so we can get one encoded block out for each raw block input.
++FLAC_API FLAC__bool BRANE__stream_encode_interleaved(FLAC__StreamEncoder *encoder, const FLAC__int16 buffer[], uint32_t samples);
++
+ /* \} */
+ 
+ #ifdef __cplusplus
+diff --git a/src/libFLAC/stream_encoder.c b/src/libFLAC/stream_encoder.c
+index c1c03e49..707bf0a2 100644
+--- a/src/libFLAC/stream_encoder.c
++++ b/src/libFLAC/stream_encoder.c
+@@ -2296,6 +2296,47 @@ FLAC_API FLAC__bool FLAC__stream_encoder_process(FLAC__StreamEncoder *encoder, c
+ 	return true;
+ }
+ 
++// BRANE: does not 'OVERREAD_' so we can get one encoded block out for each raw
++//        block input to the encoder.  FLAC__stream_encoder_process_interleaved
++//        also made 'buffer' argument 16-bit since this is what we use.
++//        also deleted the verify support since it wants 32-bit data.
++FLAC_API FLAC__bool BRANE__stream_encode_interleaved(FLAC__StreamEncoder *encoder, const FLAC__int16 buffer[], uint32_t samples)
++{
++	uint32_t i, j, k, channel;
++	const uint32_t channels = encoder->protected_->channels, blocksize = encoder->protected_->blocksize;
++	const FLAC__int32 sample_max = INT32_MAX >> (32 - encoder->protected_->bits_per_sample);
++	const FLAC__int32 sample_min = INT32_MIN >> (32 - encoder->protected_->bits_per_sample);
++
++	FLAC__ASSERT(0 != encoder);
++	FLAC__ASSERT(0 != encoder->private_);
++	FLAC__ASSERT(0 != encoder->protected_);
++
++	if(encoder->protected_->state != FLAC__STREAM_ENCODER_OK)
++		return false;
++
++	j = k = 0;
++	do {
++		for(i = encoder->private_->current_sample_number; i < blocksize && j < samples; i++, j++) {
++			for(channel = 0; channel < channels; channel++){
++				if(buffer[k] < sample_min || buffer[k] > sample_max){
++					encoder->protected_->state = FLAC__STREAM_ENCODER_CLIENT_ERROR;
++					return false;
++				}
++				encoder->private_->integer_signal[channel][i] = buffer[k++];
++			}
++		}
++		encoder->private_->current_sample_number = i;
++		/* we only process if we have a full block + 1 extra sample; final block is always handled by FLAC__stream_encoder_finish() */
++		if(i == blocksize) {
++			if(!process_frame_(encoder, /*is_last_block=*/false))
++				return false;
++			encoder->private_->current_sample_number = 0;
++		}
++	} while(j < samples);
++
++	return true;
++}
++
+ FLAC_API FLAC__bool FLAC__stream_encoder_process_interleaved(FLAC__StreamEncoder *encoder, const FLAC__int32 buffer[], uint32_t samples)
+ {
+ 	uint32_t i, j, k, channel;
+-- 
+2.34.1
+

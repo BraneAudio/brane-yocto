@@ -1,0 +1,27 @@
+Brane Audio Yocto Layers
+-------------------------------------------------------------------------------------
+
+This contains the Yocto layers for Brane Audio.
+
+It is intended to provide one a way to build packages the same way that the Brane
+Audio code does.
+
+Probably the easiest way to build the packages is to start from the brane-oss repo
+and follow its instructions.  That will build an image with all of the packages
+in the same way that Brane Audio does.  It will grab the correct revisions of the
+other layers that Brane Audio uses to work with these layers.
+
+For information specific to a given layer consult the README at the top of that layer.
+
+-------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------
+
+For images built using these layers, they might include or exclude some files in the
+image itself that is different than what Brane distributes, but the packages should
+have been built how Brane Audio did (as long as the same versions of the other layers
+are used and no other changes to files or extra layers are included).
+
+For instance, in the real image distributed by Brane Audio there are no GPL3 items in
+it, but other images built by others using this layer might have some just due to how
+they are created.
+

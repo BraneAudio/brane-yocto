@@ -1,0 +1,31 @@
+From f2358c7f869ebe7de999d2c529b8ba39b7fcd408 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Fri, 15 Sep 2023 13:08:34 -0500
+Subject: [PATCH] v1.4.3 init vars
+
+---
+ src/libFLAC/bitreader.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/libFLAC/bitreader.c b/src/libFLAC/bitreader.c
+index 829b308e..bfa9c2b5 100644
+--- a/src/libFLAC/bitreader.c
++++ b/src/libFLAC/bitreader.c
+@@ -286,11 +286,13 @@ void FLAC__bitreader_delete(FLAC__BitReader *br)
+ FLAC__bool FLAC__bitreader_init(FLAC__BitReader *br, FLAC__BitReaderReadCallback rcb, void *cd)
+ {
+ 	FLAC__ASSERT(0 != br);
++   memset(br, 0, sizeof(*br)); // BRANE_AUDIO
+ 
+ 	br->words = br->bytes = 0;
+ 	br->consumed_words = br->consumed_bits = 0;
+ 	br->capacity = FLAC__BITREADER_DEFAULT_CAPACITY;
+-	br->buffer = malloc(sizeof(brword) * br->capacity);
++	br->buffer = calloc(br->capacity, sizeof(brword)); // BRANE_AUDIO
++//	br->buffer = malloc(sizeof(brword) * br->capacity);
+ 	if(br->buffer == 0)
+ 		return false;
+ 	br->read_callback = rcb;
+-- 
+2.34.1
+

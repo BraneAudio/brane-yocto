@@ -1,0 +1,47 @@
+diff --git a/src/manager.c b/src/manager.c
+index 558b71b0..b9866ae3 100644
+--- a/src/manager.c
++++ b/src/manager.c
+@@ -254,6 +254,42 @@ static void manager_create_interfaces(struct wiphy_setup_state *state)
+ 
+ 	state->pending_cmd_count++;
+ 
++// EAW ------------------------------------------------------------------------v
++	snprintf(ifname, sizeof(ifname), "softap%i", (int) state->id);
++	l_debug("creating %s", ifname);
++	iftype = NL80211_IFTYPE_AP;
++
++	msg = l_genl_msg_new(NL80211_CMD_NEW_INTERFACE);
++	l_genl_msg_append_attr(msg, NL80211_ATTR_WIPHY, 4, &state->id);
++	l_genl_msg_append_attr(msg, NL80211_ATTR_IFTYPE, 4, &iftype);
++	l_genl_msg_append_attr(msg, NL80211_ATTR_IFNAME,
++				strlen(ifname) + 1, ifname);
++	l_genl_msg_append_attr(msg, NL80211_ATTR_4ADDR, 1, "\0");
++	l_genl_msg_append_attr(msg, NL80211_ATTR_SOCKET_OWNER, 0, "");
++
++	if (randomize && wiphy_has_feature(state->wiphy,
++					NL80211_FEATURE_MAC_ON_CREATE)) {
++		uint8_t random_addr[6];
++
++		wiphy_generate_random_address(state->wiphy, random_addr);
++		l_debug("Creating interface on phy: %s with random addr: "MAC,
++						wiphy_get_name(state->wiphy),
++						MAC_STR(random_addr));
++		l_genl_msg_append_attr(msg, NL80211_ATTR_MAC, 6, random_addr);
++	}
++
++	cmd_id = l_genl_family_send(nl80211, msg,
++					manager_new_station_interface_cb, state,
++					manager_new_interface_done);
++
++	if (!cmd_id) {
++		l_error("Error sending NEW_INTERFACE for %s", ifname);
++		return;
++	}
++
++	state->pending_cmd_count++;
++// EAW ------------------------------------------------------------------------^
++
+ try_create_p2p:
+ 	/*
+ 	 * Require the MAC on create feature so we can send our desired

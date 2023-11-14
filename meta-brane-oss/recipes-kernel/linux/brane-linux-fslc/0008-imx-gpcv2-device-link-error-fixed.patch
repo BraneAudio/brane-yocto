@@ -1,0 +1,42 @@
+From 61ceb57318130ed993bdc5f99bd7308be7626f54 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Fri, 20 Oct 2023 17:50:11 -0500
+Subject: [PATCH] imx-gpcv2: device link error fixed
+
+Prior to this patch, booting the kernel would result in several
+errors in the form of: imx-gpcv2 303a0000.gpc: Failed to create
+device link (0x180) with 30360000.anatop:regulator-vdd1p0d.
+
+Solution found here: https://lkml.org/lkml/2022/8/16/243
+---
+ drivers/irqchip/irq-imx-gpcv2.c | 1 +
+ drivers/soc/imx/gpcv2.c         | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/drivers/irqchip/irq-imx-gpcv2.c b/drivers/irqchip/irq-imx-gpcv2.c
+index b9c22f764b4d..d5383d9a1825 100644
+--- a/drivers/irqchip/irq-imx-gpcv2.c
++++ b/drivers/irqchip/irq-imx-gpcv2.c
+@@ -283,6 +283,7 @@ static int __init imx_gpcv2_irqchip_init(struct device_node *node,
+ 	 * later the GPC power domain driver will not be skipped.
+ 	 */
+ 	of_node_clear_flag(node, OF_POPULATED);
++	fwnode_dev_initialized(domain->fwnode, false); // BRANE
+ 	return 0;
+ }
+ 
+diff --git a/drivers/soc/imx/gpcv2.c b/drivers/soc/imx/gpcv2.c
+index 88aee59730e3..3416a96976ff 100644
+--- a/drivers/soc/imx/gpcv2.c
++++ b/drivers/soc/imx/gpcv2.c
+@@ -1516,6 +1516,7 @@ static int imx_gpcv2_probe(struct platform_device *pdev)
+ 
+ 		pd_pdev->dev.parent = dev;
+ 		pd_pdev->dev.of_node = np;
++		pd_pdev->dev.fwnode = of_fwnode_handle(np); // BRANE
+ 
+ 		ret = platform_device_add(pd_pdev);
+ 		if (ret) {
+-- 
+2.34.1
+

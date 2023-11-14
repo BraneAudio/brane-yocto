@@ -1,0 +1,121 @@
+From a29274a649564f9a4eeca402ff93516c026f6b05 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Wed, 8 Mar 2023 11:26:35 -0600
+Subject: [PATCH] add expanded http header support
+
+Added for avs audio player v1.5; supports adding separate custon http headers for fetching manifests, decryption keys, and audio segments.
+---
+ libavformat/aviobuf.c |  3 ++-
+ libavformat/hls.c     |  8 ++++++++
+ libavformat/http.c    | 34 ++++++++++++++++++++++++++++++++++
+ 3 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/libavformat/aviobuf.c b/libavformat/aviobuf.c
+index b20b1a611a..4f3113dcf3 100644
+--- a/libavformat/aviobuf.c
++++ b/libavformat/aviobuf.c
+@@ -1022,7 +1022,8 @@ URLContext* ffio_geturlcontext(AVIOContext *s)
+ 
+ int ffio_copy_url_options(AVIOContext* pb, AVDictionary** avio_opts)
+ {
+-    const char *opts[] = {
++    const char *opts[] = { // BRANE: expanded http header support
++        "brane_header_manifest", "brane_header_dec_key", "brane_header_segment",
+         "headers", "user_agent", "cookies", "http_proxy", "referer", "rw_timeout", "icy", NULL };
+     const char **opt = opts;
+     uint8_t *buf = NULL;
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index e622425e80..f1730d37e2 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -1293,6 +1293,7 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+ 
+     if (seg->key_type == KEY_AES_128 || seg->key_type == KEY_SAMPLE_AES) {
+         if (strcmp(seg->key, pls->key_url)) {
++            av_dict_set_int(&opts, "brane_header_ena_dec_key", 1, 0); // BRANE: expanded http header support
+             AVIOContext *pb = NULL;
+             if (open_url(pls->parent, &pb, seg->key, &c->avio_opts, opts, NULL) == 0) {
+                 ret = avio_read(pb, pls->key, sizeof(pls->key));
+@@ -1320,6 +1321,8 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+ 
+         av_dict_set(&opts, "key", key, 0);
+         av_dict_set(&opts, "iv", iv, 0);
++        av_dict_set_int(&opts, "brane_header_ena_dec_key", 0, 0); // BRANE: expanded http header support
++        av_dict_set_int(&opts, "brane_header_ena_segment", 1, 0);
+ 
+         ret = open_url(pls->parent, in, url, &c->avio_opts, opts, &is_http);
+         if (ret < 0) {
+@@ -1327,6 +1330,11 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+         }
+         ret = 0;
+     } else {
++        // BRANE: expanded http header support
++        if (seg->key_type == KEY_SAMPLE_AES) {
++           av_dict_set_int(&opts, "brane_header_ena_dec_key", 0, 0);
++        }
++        av_dict_set_int(&opts, "brane_header_ena_segment", 1, 0);
+         ret = open_url(pls->parent, in, seg->url, &c->avio_opts, opts, &is_http);
+     }
+ 
+diff --git a/libavformat/http.c b/libavformat/http.c
+index 1f4a5cebb2..659fcdf785 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -140,6 +140,13 @@ typedef struct HTTPContext {
+     // BRANE: redirect cache support
+     URLContext *redirected_hd;
+     char *redirected_location;
++
++    // BRANE: expanded http header support
++    char *brane_header_manifest;
++    char *brane_header_dec_key;
++    char *brane_header_segment;
++    int brane_header_ena_dec_key;
++    int brane_header_ena_segment;
+ } HTTPContext;
+ 
+ #define OFFSET(x) offsetof(HTTPContext, x)
+@@ -182,6 +189,14 @@ static const AVOption options[] = {
+     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
+     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
+     { "short_seek_size", "Threshold to favor readahead over seek.", OFFSET(short_seek_size), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, D },
++
++    // BRANE: expanded http header support
++    { "brane_header_manifest",    "custom HTTP headers for manifests",       OFFSET(brane_header_manifest),    AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_dec_key",     "custom HTTP headers for decryption keys", OFFSET(brane_header_dec_key),     AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_segment",     "custom HTTP headers for audio segments",  OFFSET(brane_header_segment),     AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_ena_dec_key", "internal use only",                       OFFSET(brane_header_ena_dec_key), AV_OPT_TYPE_BOOL,   { .i64 = 0 },    0, 1, D },
++    { "brane_header_ena_segment", "internal use only",                       OFFSET(brane_header_ena_segment), AV_OPT_TYPE_BOOL,   { .i64 = 0 },    0, 1, D },
++
+     { NULL }
+ };
+ 
+@@ -1541,6 +1556,25 @@ static int http_connect(URLContext *h, const char *path, const char *local_path,
+     if (!has_header(s->headers, "\r\nIcy-MetaData: ") && s->icy)
+         av_bprintf(&request, "Icy-MetaData: 1\r\n");
+ 
++    // BRANE: expanded http header support
++    // libavformat/hls.c will set/clear brane_header_ena_* to indicate the type
++    // of http transaction that is occurring (manifest, decryption keys, audio
++    // segment).  Note that there is no specific enable for the manifest.
++    // Rather, the absense of either other enable defaults to a manifest.  This
++    // is because the hls module appears to be selected -after- the manifest
++    // has been retrieved (e.g. after the probe).  Rather than muck up more of
++    // the code to track when the manifest is fetched I've chosen to default to
++    // the manifest if neither the decrypt key or audio segment is selected.
++    if(s->brane_header_manifest && !s->brane_header_ena_dec_key
++                                && !s->brane_header_ena_segment)
++        av_bprintf(&request, "%s\r\n", s->brane_header_manifest);
++
++    if(s->brane_header_dec_key && s->brane_header_ena_dec_key)
++        av_bprintf(&request, "%s\r\n", s->brane_header_dec_key);
++
++    if(s->brane_header_segment && s->brane_header_ena_segment)
++        av_bprintf(&request, "%s\r\n", s->brane_header_segment);
++
+     /* now add in custom headers */
+     if (s->headers)
+         av_bprintf(&request, "%s", s->headers);
+-- 
+2.34.1
+

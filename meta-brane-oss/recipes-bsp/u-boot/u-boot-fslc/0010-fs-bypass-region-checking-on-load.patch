@@ -1,0 +1,27 @@
+From 2e39cd03bb6440dd53576a47e4ce988fa8fda51f Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Tue, 17 Oct 2023 11:36:27 -0500
+Subject: [PATCH] fs: bypass region checking on load
+
+---
+ fs/fs.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/fs/fs.c b/fs/fs.c
+index 023f89cafe..689f159982 100644
+--- a/fs/fs.c
++++ b/fs/fs.c
+@@ -515,6 +515,10 @@ static int fs_read_lmb_check(const char *filename, ulong addr, loff_t offset,
+ 	lmb_init_and_reserve(&lmb, gd->bd, (void *)gd->fdt_blob);
+ 	lmb_dump_all(&lmb);
+ 
++#if defined(CONFIG_TARGET_BRANE_CTRL1_CALDRAM)
++   return 0;
++#endif
++
+ 	if (lmb_alloc_addr(&lmb, addr, read_len) == addr)
+ 		return 0;
+ 
+-- 
+2.34.1
+

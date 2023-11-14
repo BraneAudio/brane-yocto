@@ -1,0 +1,146 @@
+From 896e739870ee66d604f9cb196ac584c8cf2ed5e3 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Fri, 20 Oct 2023 17:34:01 -0500
+Subject: [PATCH] add ba01k01 codec
+
+---
+ sound/soc/codecs/Kconfig   |  3 ++
+ sound/soc/codecs/Makefile  |  2 +
+ sound/soc/codecs/ba01k01.c | 76 ++++++++++++++++++++++++++++++++++++++
+ sound/soc/fsl/Kconfig      |  8 ++++
+ 4 files changed, 89 insertions(+)
+ create mode 100644 sound/soc/codecs/ba01k01.c
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 965ae55fa160..f82ef39c2420 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -2168,4 +2168,7 @@ config SND_SOC_LPASS_TX_MACRO
+ 	select SND_SOC_LPASS_MACRO_COMMON
+ 	tristate "Qualcomm TX Macro in LPASS(Low Power Audio SubSystem)"
+ 
++config SND_SOC_BA01K01
++	tristate "Brane Audio CODEC"
++
+ endmenu
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 71d3ce5867e4..77ec818d0181 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -357,6 +357,7 @@ snd-soc-tas2764-objs := tas2764.o
+ snd-soc-tas2780-objs := tas2780.o
+ # Mux
+ snd-soc-simple-mux-objs := simple-mux.o
++snd-soc-ba01k01-objs := ba01k01.o
+ 
+ obj-$(CONFIG_SND_SOC_88PM860X)	+= snd-soc-88pm860x.o
+ obj-$(CONFIG_SND_SOC_AB8500_CODEC)	+= snd-soc-ab8500-codec.o
+@@ -721,3 +722,4 @@ obj-$(CONFIG_SND_SOC_LPASS_TX_MACRO)	+= snd-soc-lpass-tx-macro.o
+ 
+ # Mux
+ obj-$(CONFIG_SND_SOC_SIMPLE_MUX)	+= snd-soc-simple-mux.o
++obj-$(CONFIG_SND_SOC_BA01K01)	+= snd-soc-ba01k01.o
+diff --git a/sound/soc/codecs/ba01k01.c b/sound/soc/codecs/ba01k01.c
+new file mode 100644
+index 000000000000..775e88517617
+--- /dev/null
++++ b/sound/soc/codecs/ba01k01.c
+@@ -0,0 +1,76 @@
++/*
++ * Copyright (C) 2023 Brane Audio
++ *
++ * SPDX-License-Identifier: GPL-2.0
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/slab.h>
++#include <sound/soc.h>
++#include <sound/pcm.h>
++#include <sound/initval.h>
++#include <linux/of.h>
++
++#define DRV_NAME "ba01k01"
++
++#define RATES   ( SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_48000 )
++#define FORMATS (SNDRV_PCM_FMTBIT_S16_LE)
++
++
++static struct snd_soc_component_driver soc_codec_ba01k01 = {
++   // stubbed out b/c we don't need anything in here
++};
++
++static struct snd_soc_dai_driver ba01k01_dai = {
++   .name            = "ba01k01-hifi",
++   .playback = {
++      .stream_name  = "Playback",
++      .channels_min = 1,
++      .channels_max = 4,
++      .rates        = RATES,
++      .formats      = FORMATS,
++   },
++   .capture = {
++      .stream_name  = "Capture",
++      .channels_min = 1,
++      .channels_max = 4,
++      .rates        = RATES,
++      .formats      = FORMATS,
++   },
++};
++
++static int ba01k01_probe(struct platform_device *pdev)
++{
++   return devm_snd_soc_register_component(&pdev->dev,&soc_codec_ba01k01,&ba01k01_dai,1);
++}
++
++static int ba01k01_remove(struct platform_device *pdev)
++{
++   return 0;
++}
++
++#ifdef CONFIG_OF
++static const struct of_device_id ba01k01_dt_ids[] = {
++   { .compatible = "brane,ba01k01", },
++   { }
++};
++MODULE_DEVICE_TABLE(of, ba01k01_dt_ids);
++#endif
++
++static struct platform_driver ba01k01_driver = {
++   .probe   = ba01k01_probe,
++   .remove  = ba01k01_remove,
++   .driver  = {
++      .name           = DRV_NAME,
++      .owner          = THIS_MODULE,
++      .of_match_table = of_match_ptr(ba01k01_dt_ids),
++   },
++};
++
++module_platform_driver(ba01k01_driver);
++
++MODULE_AUTHOR("BraneAudio");
++MODULE_DESCRIPTION("BA01K01 codec driver");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:" DRV_NAME);
+diff --git a/sound/soc/fsl/Kconfig b/sound/soc/fsl/Kconfig
+index 614eceda6b9e..9805a5490069 100644
+--- a/sound/soc/fsl/Kconfig
++++ b/sound/soc/fsl/Kconfig
+@@ -368,6 +368,14 @@ config SND_SOC_IMX_CARD
+ 	  with OF-graph DT bindings.
+ 	  It also support DPCM of single CPU multi Codec ststem.
+ 
++config SND_SOC_IMX_BA01K01
++	tristate "SoC Audio support for i.MX boards with ba01k01"
++	depends on OF && I2C
++	select SND_SOC_BA01K01
++	select SND_SOC_IMX_PCM_DMA
++	select SND_SOC_FSL_SAI
++	select SND_SOC_FSL_UTILS
++
+ endif # SND_IMX_SOC
+ 
+ endmenu
+-- 
+2.34.1
+

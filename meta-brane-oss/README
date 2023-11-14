@@ -1,0 +1,170 @@
+Brane Audio Yocto Layer
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+This layer provides support for Brane Audio OSS for use with Yocto.
+
+This layer depends on:
+
+URI: git://git.yoctoproject.org/poky
+URI: git://github.com/openembedded/meta-openembedded
+URI: git://git.yoctoproject.org/meta-freescale (This has its own licensing
+      requirements depending on which recipes you use.  Brane Audio was not using
+      any of those when this note was written, and everything being used should
+      be under normal open source licensing.)
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Licensing Notes:
+
+Brane Audio authored files in this layer are MIT licensed.  (See COPYING.MIT)
+
+Some files in this layer have a different license due to where we grabbed them
+from (i.e. we grab linux firmware files and put them into a folder for the linux
+kernel, since we build them into the kernel).  Those files have the license in the
+same folder.
+
+There are recipes in this layer from time to time that are copied from other layers
+(usually because there is a later version of some package that was wanted but did
+not have a recipe in the version of Yocto everything else was using at the time).
+Those recipes would still fall under the licenses of the original layer.  A list
+of those recipes and their licensing should be maintained below.
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Other Layer Licensing:
+
+Poky Layer Licensing (per LICENSE file at top directory of layer):
+  Different components of OpenEmbedded are under different licenses (a mix
+  of MIT and GPLv2). See COPYING.GPL-2.0-only and COPYING.MIT for further 
+  details of the individual licenses.
+
+  All metadata is MIT licensed unless otherwise stated. Source code
+  included in tree for individual recipes (e.g. patches) are under 
+  the LICENSE stated in the associated recipe (.bb file) unless 
+  otherwise stated.
+
+  License information for any other files is either explicitly stated 
+  or defaults to GPL version 2 only.
+
+  Individual files contain the following style tags instead of the full license 
+  text to identify their license:
+
+      SPDX-License-Identifier: GPL-2.0-only
+      SPDX-License-Identifier: MIT
+
+  This enables machine processing of license information based on the SPDX
+  License Identifiers that are here available: http://spdx.org/licenses/
+
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Recipes Currently Borrowed From Other Layers:
+
+bluez5
+From: poky/meta/recipes-connectivity/bluez5/
+In: meta-brane-oss/recipes-connectivity/bluez5/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+iwd
+From: meta-openembedded/meta-oe/recipes-connectivity/iwd/
+In: meta-brane-oss/recipes-connectivity/iwd/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++ Follows meta-oe licensing rules which is MIT.
+
+openssl
+From: poky/meta/recipes-connectivity/openssl/
+In: meta-brane-oss/recipes-connectivity/openssl/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+busybox
+From: poky/meta/recipes-core/busybox/
+In: meta-brane-oss/recipes-core/busybox/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+dbus
+From: poky/meta/recipes-core/dbus/
+In: meta-brane-oss/recipes-core/dbus/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+ell
+From: poky/meta/recipes-core/ell/
+In: meta-brane-oss/recipes-core/ell/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+libxml2
+From: poky/meta/recipes-core/libxml/
+In: meta-brane-oss/recipes-core/libxml/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+systemd
+systemd-compat-units
+systemd-serialgetty
+systemd-systemctl-native
+From: poky/meta/recipes-core/systemd/
+In: meta-brane-oss/recipes-core/systemd/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+e2fsprogs
+From: poky/meta/recipes-devtools/e2fsprogs/
+In: meta-brane-oss/recipes-devtools/e2fsprogs/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+elfutils
+From: poky/meta/recipes-devtools/elfutils/
+In: meta-brane-oss/recipes-devtools/elfutils/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+linux-fslc
+From: meta-freescale/recipes-kernel/linux/
+In: meta-brane-oss/recipes-kernel/linux/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++ Licensed under MIT (SPDX-License-Identifier in recipe file)
+
+linux-libc-headers
+From: poky/meta/recipes-kernel/linux-libc-headers/
+In: meta-brane-oss/recipes-kernel/linux-libc-headers/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+flac
+From: poky/meta/recipes-multimedia/flac/
+In: meta-brane-oss/recipes-multimedia/flac/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+mdns
+From: meta-openembedded/meta-networking/recipes-protocols/mdns/
+In: meta-brane-oss/recipes-protocols/mdns/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++ Follows meta-networking licensing rules which is MIT.
+
+curl
+From: poky/meta/recipes-support/curl/
+In: meta-brane-oss/recipes-support/curl/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+gnutls
+libtasn1 (in same folder which we copied but we do not use)
+From: poky/meta/recipes-support/gnutls/
+In: meta-brane-oss/recipes-support/gnutls/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+
+sqlite3
+From: poky/meta/recipes-support/sqlite/
+In: meta-brane-oss/recipes-support/sqlite/
+Reason: Later Version Than In Normal Layer For Yocto Version In Use
++  Follows poky licensing rules above.
+

@@ -1,0 +1,29 @@
+From 129801c6bba49001862f9ac94861744b31b5e6da Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Mon, 6 Nov 2023 11:42:04 -0600
+Subject: [PATCH] nl80211: silence backtrace
+
+This change is in a formal kernel patch, just not one that has been
+applied to this kernel tree (so I have to do it).  The problem is
+that a kernel backtrace gets dumped to the system log for a
+condition that can occur without requiring such attention.
+---
+ net/wireless/nl80211.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 087c0c442e23..fc276b942fd5 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -8410,7 +8410,7 @@ static int nl80211_get_reg_do(struct sk_buff *skb, struct genl_info *info)
+ 		regdom = get_wiphy_regdom(wiphy);
+ 
+ 		/* a self-managed-reg device must have a private regdom */
+-		if (WARN_ON(!regdom && self_managed)) {
++		if (!regdom && self_managed) {
+ 			err = -EINVAL;
+ 			goto nla_put_failure_rcu;
+ 		}
+-- 
+2.34.1
+

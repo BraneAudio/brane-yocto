@@ -1,0 +1,14 @@
+Distro layer for Brane Audio
+======================================================
+
+This layer provides support for Brane Audio OSS software for use with
+OpenEmbedded and/or Yocto.
+
+This layer depends on:
+
+URI: git://git.yoctoproject.org/poky
+URI: git://git.yoctoproject.org/meta-freescale
+URI: git://github.com/Freescale/meta-freescale-distro
+URI: git://github.com/openembedded/meta-openembedded
+
+

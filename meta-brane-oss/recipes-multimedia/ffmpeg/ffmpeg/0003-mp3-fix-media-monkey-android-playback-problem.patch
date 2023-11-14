@@ -1,0 +1,26 @@
+From e10b2f01f3024a21bc1e2f40f090bd88f0f10924 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Wed, 8 Mar 2023 11:38:27 -0600
+Subject: [PATCH] mp3: fix media monkey android playback problem
+
+Changed a uint64_t to an int64_t for error return value parsing.  This fixed an error rendering mp3 audio from media monkey android.
+---
+ libavformat/mp3dec.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libavformat/mp3dec.c b/libavformat/mp3dec.c
+index 458d6dbd03..bf28fee6b5 100644
+--- a/libavformat/mp3dec.c
++++ b/libavformat/mp3dec.c
+@@ -170,7 +170,7 @@ static void mp3_parse_info_tag(AVFormatContext *s, AVStream *st,
+ 
+     MP3DecContext *mp3 = s->priv_data;
+     static const int64_t xing_offtbl[2][2] = {{32, 17}, {17,9}};
+-    uint64_t fsize = avio_size(s->pb);
++    int64_t fsize = avio_size(s->pb); // BRANE: was uint64_t
+     int64_t pos = avio_tell(s->pb);
+     fsize = fsize >= pos ? fsize - pos : 0;
+ 
+-- 
+2.34.1
+

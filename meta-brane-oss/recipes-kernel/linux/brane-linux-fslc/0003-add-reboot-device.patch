@@ -1,0 +1,64 @@
+From bcbbab1a2e7b18a60118b8a13b1cbc5eb38353dc Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Fri, 20 Oct 2023 17:37:15 -0500
+Subject: [PATCH] add reboot device
+
+---
+ arch/arm/mach-imx/mach-imx7d.c | 36 +++++++++++++++++++++++++++++-----
+ 1 file changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-imx/mach-imx7d.c b/arch/arm/mach-imx/mach-imx7d.c
+index 6fdd06bcf988..4c857758f7a9 100644
+--- a/arch/arm/mach-imx/mach-imx7d.c
++++ b/arch/arm/mach-imx/mach-imx7d.c
+@@ -73,6 +73,31 @@ static void __init imx7d_init_irq(void)
+ 	irqchip_init();
+ }
+ 
++// BRANE EDITS ----------------------------------------------------------------v
++#include <linux/i2c.h>
++static int brane1_i2c_write_device(u8 regoffset, u32 value)
++{
++	struct i2c_adapter *adap;
++	struct i2c_msg msg;
++	int err;
++	adap = i2c_get_adapter(2);
++	if(!adap) return -ENODEV;
++	msg.addr = regoffset;
++	msg.flags = 0;
++	msg.len = 4;
++	msg.buf = (u8 *)&value;
++	err = i2c_transfer(adap, (struct i2c_msg *)&msg, 1);
++	i2c_put_adapter(adap);
++	if(err >= 0) return 0;
++	return err;
++}
++
++static void brane1_restart(enum reboot_mode mode, const char *cmd)
++{
++	brane1_i2c_write_device(0x60, 0x00000001);
++}
++// BRANE EDITS ----------------------------------------------------------------^
++
+ static const char *const imx7d_dt_compat[] __initconst = {
+ 	"fsl,imx7d",
+ 	"fsl,imx7s",
+@@ -80,9 +105,10 @@ static const char *const imx7d_dt_compat[] __initconst = {
+ };
+ 
+ DT_MACHINE_START(IMX7D, "Freescale i.MX7 Dual (Device Tree)")
+-	.smp            = smp_ops(imx7_smp_ops),
+-	.init_irq	= imx7d_init_irq,
+-	.init_machine	= imx7d_init_machine,
+-	.init_late      = imx7d_init_late,
+-	.dt_compat	= imx7d_dt_compat,
++	.smp          = smp_ops(imx7_smp_ops),
++	.init_irq     = imx7d_init_irq,
++	.init_machine = imx7d_init_machine,
++	.init_late    = imx7d_init_late,
++	.dt_compat    = imx7d_dt_compat,
++	.restart      = brane1_restart,
+ MACHINE_END
+-- 
+2.34.1
+

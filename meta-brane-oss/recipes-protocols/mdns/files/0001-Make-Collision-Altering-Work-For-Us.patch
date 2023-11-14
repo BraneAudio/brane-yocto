@@ -1,0 +1,83 @@
+From 6bdba7e2fff6a0d29be07bb98e63851f087dd845 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Wed, 1 Nov 2023 16:23:37 -0500
+Subject: [PATCH] Make Collision Altering Work For Us.
+
+---
+ mDNSPosix/PosixDaemon.c | 53 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 53 insertions(+)
+
+diff --git a/mDNSPosix/PosixDaemon.c b/mDNSPosix/PosixDaemon.c
+index 9a0f692..a3fa060 100644
+--- a/mDNSPosix/PosixDaemon.c
++++ b/mDNSPosix/PosixDaemon.c
+@@ -58,6 +58,54 @@ static domainname DynDNSHostname;
+ static CacheEntity gRRCache[RR_CACHE_SIZE];
+ static mDNS_PlatformSupport PlatformStorage;
+ 
++// Our normal hostname has a hyphen followed by digits which on a collision the
++// mDNS code will take that to be an increment value.  So, we need to deal with
++// that by handling the first collision here by appending a '-2'.  From then on,
++// other collisions should be handled fine by the normal mDNS code.
++#define MIN_BRANE_LEN 22
++#define FIRST_HEX_DIGIT_LOC 7 // Location in name->c[].
++#define NUM_HEX_DIGITS      16
++#define isHexDigit(X)      (((X) >= '0' && (X) <= '9') || ((X) >= 'A' && (X) <= 'F') || ((X) >= 'a' && (X) <= 'f'))
++
++static mDNSBool looks_like_brane(domainlabel *name) {
++   mDNSu32 len = name->c[0];
++   mDNSu8 *start = &name->c[1];
++   mDNSu32 i;
++
++    if( (len != MIN_BRANE_LEN) ){
++      // Impossible size
++      return mDNSfalse;
++    }
++
++   if( strncmp((const char *)start, "Brane-", 6) ) {
++      return mDNSfalse;
++   }
++
++   for( i = FIRST_HEX_DIGIT_LOC; i < (FIRST_HEX_DIGIT_LOC + NUM_HEX_DIGITS); i++ ) {
++      if( !isHexDigit(name->c[i]) ) {
++         return mDNSfalse;
++      }
++   }
++
++   return mDNStrue;
++}
++
++static void brane_alter_host_name(domainlabel *name)
++{
++   mDNSu32 len = name->c[0];
++   mDNSu32 inc_val = 0;
++
++   if( looks_like_brane( name) ) {
++      // Have not had a collision before.
++      name->c[++len] = '-';
++      name->c[++len] = '2';
++      name->c[0] = MIN_BRANE_LEN + 2;
++      LogMsg("Altered Brane Hostname");
++   } else {
++      LogMsg("Not a Brane Hostname!!");
++   }
++}
++
+ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
+ {
+     (void)m; // Unused
+@@ -69,6 +117,11 @@ mDNSlocal void mDNS_StatusCallback(mDNS *const m, mStatus result)
+         // On Mac OS X we store the current dot-local mDNS host name in the SCPreferences store,
+         // and notify the user with a CFUserNotification.
+     }
++    else if (result == mStatus_NameConflict)
++    {
++      // Brane - On a collision, use our own collision resolution.
++      brane_alter_host_name(&m->hostlabel);
++    }
+     else if (result == mStatus_ConfigChanged)
+     {
+         udsserver_handle_configchange(m);
+-- 
+2.34.1
+

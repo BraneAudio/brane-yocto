@@ -1,0 +1,26 @@
+From d7601408c0bd4b0cbb111c93bf4eb0be0fb72ab3 Mon Sep 17 00:00:00 2001
+From: Richard Greer <rg@braneaudio.com>
+Date: Wed, 8 Feb 2023 10:02:35 -0600
+Subject: [PATCH] Made LLMNR be off by default since it opens a port we do not
+ use.
+
+---
+ src/resolve/resolved.conf.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/resolve/resolved.conf.in b/src/resolve/resolved.conf.in
+index 6d4176df52..705ad3f404 100644
+--- a/src/resolve/resolved.conf.in
++++ b/src/resolve/resolved.conf.in
+@@ -25,7 +25,7 @@
+ #DNSSEC={{DEFAULT_DNSSEC_MODE_STR}}
+ #DNSOverTLS={{DEFAULT_DNS_OVER_TLS_MODE_STR}}
+ #MulticastDNS={{DEFAULT_MDNS_MODE_STR}}
+-#LLMNR={{DEFAULT_LLMNR_MODE_STR}}
++LLMNR=no
+ #Cache=yes
+ #CacheFromLocalhost=no
+ #DNSStubListener=yes
+-- 
+2.34.1
+

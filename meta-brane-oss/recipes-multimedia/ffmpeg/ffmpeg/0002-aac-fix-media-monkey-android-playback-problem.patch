@@ -1,0 +1,29 @@
+From fae1a4cea452d4391ea2c736dc6536587889c003 Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Wed, 8 Mar 2023 11:33:18 -0600
+Subject: [PATCH] aac-lc: fix media monkey android playback problem
+
+found that with media monkey android we would get http 416 when trying to stream mov audio [aac-lc] which would prevent audio from paying.  limited this ignore to when the offset is zero to limit its impact on libavformat behavior.
+---
+ libavformat/http.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/libavformat/http.c b/libavformat/http.c
+index 659fcdf785..3415addef5 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -867,6 +867,11 @@ static int check_http_code(URLContext *h, int http_code, const char *end)
+         (http_code != 401 || s->auth_state.auth_type != HTTP_AUTH_NONE) &&
+         (http_code != 407 || s->proxy_auth_state.auth_type != HTTP_AUTH_NONE)) {
+         end += strspn(end, SPACE_CHARS);
++        // BRANE: fix media monkey android playback problem
++        if( (s->off==0) && (http_code==416) ) {
++            av_log(h, AV_LOG_WARNING, "Ignoring HTTP error %d %s\n", http_code, end);
++            return 0;
++        }
+         av_log(h, AV_LOG_WARNING, "HTTP error %d %s\n", http_code, end);
+         return ff_http_averror(http_code, AVERROR(EIO));
+     }
+-- 
+2.34.1
+
