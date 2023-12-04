@@ -25,6 +25,7 @@ SANITY_TESTED_DISTROS =+ " \
             ubuntu-19.10 \n \
             ubuntu-20.04 \n \
             ubuntu-22.04 \n \
+            pop-22.04 \n \
             "
 
 ERROR_QA:remove = "version-going-backwards"
