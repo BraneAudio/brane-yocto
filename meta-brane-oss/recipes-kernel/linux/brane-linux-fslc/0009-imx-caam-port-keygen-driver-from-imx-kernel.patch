@@ -1,16 +1,9 @@
-From c3b2443221ec5270dac5e104e6209931015cfa88 Mon Sep 17 00:00:00 2001
-From: Richard Greer <rg@braneaudio.com>
-Date: Mon, 23 Oct 2023 11:47:40 -0500
+From 5efa48376264570060848437510f85c34317f86d Mon Sep 17 00:00:00 2001
+From: Brane-EAW <ethan@braneaudio.com>
+Date: Mon, 30 Oct 2023 17:35:55 -0500
 Subject: [PATCH] imx-caam: port keygen driver from imx kernel
 
-Basically just copied the contents of drivers/crypto/caam/ and
-security/keys (and a few include/ headers) from the imx kernel
-into the fslc kernel source tree.
-
-The imx kernel is from:
-   https://github.com/nxp-imx/linux-imx
-
-Also updated imx7s.dtsi to enable the caam keygen driver.
+basically just copied the contents of drivers/crypto/caam/ and security/keys (and a few include/ headers) from the imx kernel into the fslc kernel source tree.  also updated imx7s.dtsi to enable the caam keygen driver.
 ---
  arch/arm/boot/dts/imx7s.dtsi                  |   10 +
  drivers/crypto/caam/Kconfig                   |   86 +-
@@ -28,9 +21,9 @@ Also updated imx7s.dtsi to enable the caam keygen driver.
  drivers/crypto/caam/caamkeyblob_desc.h        |  101 ++
  drivers/crypto/caam/caamkeyblob_test.c        |  127 ++
  drivers/crypto/caam/caamkeygen.c              |  630 ++++++++
- drivers/crypto/caam/caampkc.c                 |    8 +-
+ drivers/crypto/caam/caampkc.c                 |    4 +-
  drivers/crypto/caam/caamrng.c                 |   57 +-
- drivers/crypto/caam/ctrl.c                    |  581 ++++++--
+ drivers/crypto/caam/ctrl.c                    |  587 ++++++--
  drivers/crypto/caam/debugfs.c                 |    9 +-
  drivers/crypto/caam/debugfs.h                 |    5 +-
  drivers/crypto/caam/desc.h                    |   55 +-
@@ -71,7 +64,7 @@ Also updated imx7s.dtsi to enable the caam keygen driver.
  security/keys/trusted-keys/Makefile           |    2 +
  security/keys/trusted-keys/trusted_core.c     |   22 +-
  security/keys/trusted-keys/trusted_dcp.c      |   65 +
- 59 files changed, 10203 insertions(+), 428 deletions(-)
+ 59 files changed, 10202 insertions(+), 431 deletions(-)
  create mode 100644 drivers/crypto/caam/caamkeyblob.c
  create mode 100644 drivers/crypto/caam/caamkeyblob.h
  create mode 100644 drivers/crypto/caam/caamkeyblob_desc.c
@@ -98,7 +91,7 @@ Also updated imx7s.dtsi to enable the caam keygen driver.
  create mode 100644 security/keys/trusted-keys/trusted_dcp.c
 
 diff --git a/arch/arm/boot/dts/imx7s.dtsi b/arch/arm/boot/dts/imx7s.dtsi
-index 11b9321badc5..58bab6baaec7 100644
+index 667568aa4326..f263bdf14516 100644
 --- a/arch/arm/boot/dts/imx7s.dtsi
 +++ b/arch/arm/boot/dts/imx7s.dtsi
 @@ -225,6 +225,11 @@ etm0_out_port: endpoint {
@@ -4365,21 +4358,10 @@ index 000000000000..d19d898657e0
 +	pr_info("caam_keygen unregistered\n");
 +}
 diff --git a/drivers/crypto/caam/caampkc.c b/drivers/crypto/caam/caampkc.c
-index 886727576710..3de0d48605f0 100644
+index 51b48b57266a..3de0d48605f0 100644
 --- a/drivers/crypto/caam/caampkc.c
 +++ b/drivers/crypto/caam/caampkc.c
-@@ -223,7 +223,9 @@ static int caam_rsa_count_leading_zeros(struct scatterlist *sgl,
- 		if (len && *buff)
- 			break;
- 
--		sg_miter_next(&miter);
-+		if (!sg_miter_next(&miter))
-+			break;
-+
- 		buff = miter.addr;
- 		len = miter.length;
- 
-@@ -1162,10 +1164,10 @@ int caam_pkc_init(struct device *ctrldev)
+@@ -1164,10 +1164,10 @@ int caam_pkc_init(struct device *ctrldev)
  
  	/* Determine public key hardware accelerator presence. */
  	if (priv->era < 10) {
@@ -4498,7 +4480,7 @@ index 77d048dfe5d0..6bb64f79e448 100644
  	return 0;
  }
 diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
-index 3b79e0d83d40..66635c9f0a6b 100644
+index 3b79e0d83d40..acd8d3a902f1 100644
 --- a/drivers/crypto/caam/ctrl.c
 +++ b/drivers/crypto/caam/ctrl.c
 @@ -3,10 +3,11 @@
@@ -4550,7 +4532,27 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  		clrsetbits_32(&ctrl->deco_rsr, 0, DECORSR_JR0);
  
  		while (!(rd_reg32(&ctrl->deco_rsr) & DECORSR_VALID) &&
-@@ -344,16 +352,15 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
+@@ -284,10 +292,6 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
+ 		const u32 rdsta_if = RDSTA_IF0 << sh_idx;
+ 		const u32 rdsta_pr = RDSTA_PR0 << sh_idx;
+ 		const u32 rdsta_mask = rdsta_if | rdsta_pr;
+-
+-		/* Clear the contents before using the descriptor */
+-		memset(desc, 0x00, CAAM_CMD_SZ * 7);
+-
+ 		/*
+ 		 * If the corresponding bit is set, this state handle
+ 		 * was initialized by somebody else, so it's left alone.
+@@ -331,6 +335,8 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
+ 		}
+ 
+ 		dev_info(ctrldev, "Instantiated RNG4 SH%d\n", sh_idx);
++		/* Clear the contents before recreating the descriptor */
++		memset(desc, 0x00, CAAM_CMD_SZ * 7);
+ 	}
+ 
+ 	kfree(desc);
+@@ -344,16 +350,15 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
  /*
   * kick_trng - sets the various parameters for enabling the initialization
   *	       of the RNG4 block in CAAM
@@ -4571,7 +4573,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  
  	ctrl = (struct caam_ctrl __iomem *)ctrlpriv->ctrl;
  	r4tst = &ctrl->r4tst[0];
-@@ -369,26 +376,38 @@ static void kick_trng(struct platform_device *pdev, int ent_delay)
+@@ -369,26 +374,38 @@ static void kick_trng(struct platform_device *pdev, int ent_delay)
  	 * Performance-wise, it does not make sense to
  	 * set the delay to a value that is lower
  	 * than the last one that worked (i.e. the state handles
@@ -4579,6 +4581,23 @@ index 3b79e0d83d40..66635c9f0a6b 100644
 -	 * time trying to set the values controlling the sample
 -	 * frequency, the function simply returns.
 +	 * were instantiated properly).
++	 */
++	rtsdctl = rd_reg32(&r4tst->rtsdctl);
++	val = (rtsdctl & RTSDCTL_ENT_DLY_MASK) >> RTSDCTL_ENT_DLY_SHIFT;
++	if (ent_delay > val) {
++		val = ent_delay;
++		/* min. freq. count, equal to 1/4 of the entropy sample length */
++		wr_reg32(&r4tst->rtfrqmin, val >> 2);
++		/* max. freq. count, equal to 16 times the entropy sample length */
++		wr_reg32(&r4tst->rtfrqmax, val << 4);
++	}
++
++	wr_reg32(&r4tst->rtsdctl, (val << RTSDCTL_ENT_DLY_SHIFT) |
++		 RTSDCTL_SAMP_SIZE_VAL);
++
++	/*
++	 * To avoid reprogramming the self-test parameters over and over again,
++	 * use RTSDCTL[SAMP_SIZE] as an indicator.
  	 */
 -	val = (rd_reg32(&r4tst->rtsdctl) & RTSDCTL_ENT_DLY_MASK)
 -	      >> RTSDCTL_ENT_DLY_SHIFT;
@@ -4596,23 +4615,6 @@ index 3b79e0d83d40..66635c9f0a6b 100644
 -	/* read the control register */
 -	val = rd_reg32(&r4tst->rtmctl);
 -start_rng:
-+	rtsdctl = rd_reg32(&r4tst->rtsdctl);
-+	val = (rtsdctl & RTSDCTL_ENT_DLY_MASK) >> RTSDCTL_ENT_DLY_SHIFT;
-+	if (ent_delay > val) {
-+		val = ent_delay;
-+		/* min. freq. count, equal to 1/4 of the entropy sample length */
-+		wr_reg32(&r4tst->rtfrqmin, val >> 2);
-+		/* max. freq. count, equal to 16 times the entropy sample length */
-+		wr_reg32(&r4tst->rtfrqmax, val << 4);
-+	}
-+
-+	wr_reg32(&r4tst->rtsdctl, (val << RTSDCTL_ENT_DLY_SHIFT) |
-+		 RTSDCTL_SAMP_SIZE_VAL);
-+
-+	/*
-+	 * To avoid reprogramming the self-test parameters over and over again,
-+	 * use RTSDCTL[SAMP_SIZE] as an indicator.
-+	 */
 +	if ((rtsdctl & RTSDCTL_SAMP_SIZE_MASK) != RTSDCTL_SAMP_SIZE_VAL) {
 +		wr_reg32(&r4tst->rtscmisc, (2 << 16) | 32);
 +		wr_reg32(&r4tst->rtpkrrng, 570);
@@ -4629,7 +4631,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	/*
  	 * select raw sampling in both entropy shifter
  	 * and statistical checker; ; put RNG4 into run mode
-@@ -397,7 +416,7 @@ static void kick_trng(struct platform_device *pdev, int ent_delay)
+@@ -397,7 +414,7 @@ static void kick_trng(struct platform_device *pdev, int ent_delay)
  		      RTMCTL_SAMP_MODE_RAW_ES_SC);
  }
  
@@ -4638,7 +4640,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  {
  	static const struct {
  		u16 ip_id;
-@@ -423,12 +442,12 @@ static int caam_get_era_from_hw(struct caam_ctrl __iomem *ctrl)
+@@ -423,12 +440,12 @@ static int caam_get_era_from_hw(struct caam_ctrl __iomem *ctrl)
  	u16 ip_id;
  	int i;
  
@@ -4653,7 +4655,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	ip_id = (id_ms & SECVID_MS_IPID_MASK) >> SECVID_MS_IPID_SHIFT;
  	maj_rev = (id_ms & SECVID_MS_MAJ_REV_MASK) >> SECVID_MS_MAJ_REV_SHIFT;
  
-@@ -448,7 +467,7 @@ static int caam_get_era_from_hw(struct caam_ctrl __iomem *ctrl)
+@@ -448,7 +465,7 @@ static int caam_get_era_from_hw(struct caam_ctrl __iomem *ctrl)
   *
   * @ctrl:	controller region
   */
@@ -4662,7 +4664,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  {
  	struct device_node *caam_node;
  	int ret;
-@@ -461,7 +480,7 @@ static int caam_get_era(struct caam_ctrl __iomem *ctrl)
+@@ -461,7 +478,7 @@ static int caam_get_era(struct caam_ctrl __iomem *ctrl)
  	if (!ret)
  		return prop;
  	else
@@ -4671,7 +4673,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  }
  
  /*
-@@ -591,6 +610,241 @@ static void caam_remove_debugfs(void *root)
+@@ -591,6 +608,241 @@ static void caam_remove_debugfs(void *root)
  	debugfs_remove_recursive(root);
  }
  
@@ -4913,7 +4915,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  #ifdef CONFIG_FSL_MC_BUS
  static bool check_version(struct fsl_mc_version *mc_version, u32 major,
  			  u32 minor, u32 revision)
-@@ -611,29 +865,28 @@ static bool check_version(struct fsl_mc_version *mc_version, u32 major,
+@@ -611,29 +863,28 @@ static bool check_version(struct fsl_mc_version *mc_version, u32 major,
  }
  #endif
  
@@ -4952,7 +4954,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  
  	ctrlpriv = devm_kzalloc(&pdev->dev, sizeof(*ctrlpriv), GFP_KERNEL);
  	if (!ctrlpriv)
-@@ -644,9 +897,44 @@ static int caam_probe(struct platform_device *pdev)
+@@ -644,9 +895,44 @@ static int caam_probe(struct platform_device *pdev)
  	nprop = pdev->dev.of_node;
  
  	imx_soc_match = soc_device_match(caam_imx_soc_table);
@@ -4997,7 +4999,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  		if (!imx_soc_match->data) {
  			dev_err(dev, "No clock data provided for i.MX SoC");
  			return -EINVAL;
-@@ -657,7 +945,7 @@ static int caam_probe(struct platform_device *pdev)
+@@ -657,7 +943,7 @@ static int caam_probe(struct platform_device *pdev)
  			return ret;
  	}
  
@@ -5006,7 +5008,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	/* Get configuration properties from device tree */
  	/* First, get register page */
  	ctrl = devm_of_iomap(dev, nprop, 0, NULL);
-@@ -667,10 +955,38 @@ static int caam_probe(struct platform_device *pdev)
+@@ -667,10 +953,38 @@ static int caam_probe(struct platform_device *pdev)
  		return ret;
  	}
  
@@ -5048,7 +5050,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  		caam_ptr_sz = sizeof(u64);
  	else
  		caam_ptr_sz = sizeof(u32);
-@@ -717,8 +1033,6 @@ static int caam_probe(struct platform_device *pdev)
+@@ -717,8 +1031,6 @@ static int caam_probe(struct platform_device *pdev)
  			 BLOCK_OFFSET * DECO_BLOCK_NUMBER
  			 );
  
@@ -5057,7 +5059,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	np = of_find_compatible_node(NULL, NULL, "fsl,qoriq-mc");
  	ctrlpriv->mc_en = !!np;
  	of_node_put(np);
-@@ -729,12 +1043,44 @@ static int caam_probe(struct platform_device *pdev)
+@@ -729,12 +1041,44 @@ static int caam_probe(struct platform_device *pdev)
  
  		mc_version = fsl_mc_get_version();
  		if (mc_version)
@@ -5103,7 +5105,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	/*
  	 * Enable DECO watchdogs and, if this is a PHYS_ADDR_T_64BIT kernel,
  	 * long pointers in master configuration register.
-@@ -774,13 +1120,14 @@ static int caam_probe(struct platform_device *pdev)
+@@ -774,13 +1118,14 @@ static int caam_probe(struct platform_device *pdev)
  			      JRSTART_JR1_START | JRSTART_JR2_START |
  			      JRSTART_JR3_START);
  
@@ -5119,7 +5121,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	ctrlpriv->domain = iommu_get_domain_for_dev(dev);
  
  	dfs_root = debugfs_create_dir(dev_name(dev), NULL);
-@@ -791,7 +1138,7 @@ static int caam_probe(struct platform_device *pdev)
+@@ -791,7 +1136,7 @@ static int caam_probe(struct platform_device *pdev)
  			return ret;
  	}
  
@@ -5128,7 +5130,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  
  	/* Check to see if (DPAA 1.x) QI present. If so, enable */
  	if (ctrlpriv->qi_present && !caam_dpaa2) {
-@@ -810,26 +1157,27 @@ static int caam_probe(struct platform_device *pdev)
+@@ -810,26 +1155,27 @@ static int caam_probe(struct platform_device *pdev)
  #endif
  	}
  
@@ -5170,7 +5172,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  	ctrlpriv->blob_present = !!(comp_params & CTPR_LS_BLOB);
  
  	/*
-@@ -838,97 +1186,27 @@ static int caam_probe(struct platform_device *pdev)
+@@ -838,97 +1184,27 @@ static int caam_probe(struct platform_device *pdev)
  	 * check both here.
  	 */
  	if (ctrlpriv->era < 10) {
@@ -5281,7 +5283,7 @@ index 3b79e0d83d40..66635c9f0a6b 100644
  
  	/* Report "alive" for developer to see */
  	dev_info(dev, "device ID = 0x%016llx (Era %d)\n", caam_id,
-@@ -947,6 +1225,9 @@ static struct platform_driver caam_driver = {
+@@ -947,6 +1223,9 @@ static struct platform_driver caam_driver = {
  	.driver = {
  		.name = "caam",
  		.of_match_table = caam_match,
@@ -12344,7 +12346,7 @@ index 735aa0bc08ef..f0f3b27f688b 100644
 +
 +trusted-$(CONFIG_TRUSTED_KEYS_DCP) += trusted_dcp.o
 diff --git a/security/keys/trusted-keys/trusted_core.c b/security/keys/trusted-keys/trusted_core.c
-index c6fc50d67214..f4c44bf9f7d6 100644
+index 85fb5c22529a..09bf67afa65b 100644
 --- a/security/keys/trusted-keys/trusted_core.c
 +++ b/security/keys/trusted-keys/trusted_core.c
 @@ -11,6 +11,7 @@
@@ -12373,8 +12375,8 @@ index c6fc50d67214..f4c44bf9f7d6 100644
 +#endif
  };
  
- DEFINE_STATIC_CALL_NULL(trusted_key_init, *trusted_key_sources[0].ops->init);
-@@ -79,6 +83,8 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
+ DEFINE_STATIC_CALL_NULL(trusted_key_seal, *trusted_key_sources[0].ops->seal);
+@@ -78,6 +82,8 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
  	int key_cmd;
  	char *c;
  
@@ -12383,7 +12385,7 @@ index c6fc50d67214..f4c44bf9f7d6 100644
  	/* main command */
  	c = strsep(datablob, " \t");
  	if (!c)
-@@ -94,6 +100,13 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
+@@ -93,6 +99,13 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
  		if (ret < 0 || keylen < MIN_KEY_SIZE || keylen > MAX_KEY_SIZE)
  			return -EINVAL;
  		p->key_len = keylen;
@@ -12397,7 +12399,7 @@ index c6fc50d67214..f4c44bf9f7d6 100644
  		ret = Opt_new;
  		break;
  	case Opt_load:
-@@ -107,6 +120,13 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
+@@ -106,6 +119,13 @@ static int datablob_parse(char **datablob, struct trusted_key_payload *p)
  		ret = hex2bin(p->blob, c, p->blob_len);
  		if (ret < 0)
  			return -EINVAL;

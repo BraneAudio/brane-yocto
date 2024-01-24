@@ -1,10 +1,10 @@
 # Set the rev to what we want from the repo.
 # This is the latest rev our patches were applied to.  It is from 07/14/2023
-# and had the comment "Merge pull request #636 from MrCry0/6.1.x+fslc
-# Update 6.1.x+fslc to 6.1.38"
+# and had the comment "Merge pull request #647 from zandrey/6.1.x+fslc
+# Update 6.1.x+fslc to 6.1.61"
 #
 # SRCBRANCH = "6.1.x+fslc"
-# SRCREV = "1e2fd7c4b605d13c62a7bee8d50a4eac1abe6858"
+# SRCREV = "31f80d4a6ba84fe19f7f7c7561798958505fd459"
 #
 #### The rev from the meta-freescale linux-fslc_6.1.bb recipe is below.  It is
 #### from 05/02/2023 and had the comment "ARM: imx_v6_v7_defconfig: Remove firmware loader helper"
@@ -15,8 +15,8 @@
 # The head of the 6.1.x+fslc branch when the recipe was edited was the rev at the
 # top that we are using.
 #
-LINUX_VERSION = "6.1.38"
-SRCREV = "1e2fd7c4b605d13c62a7bee8d50a4eac1abe6858"
+LINUX_VERSION = "6.1.61"
+SRCREV = "31f80d4a6ba84fe19f7f7c7561798958505fd459"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/brane-linux-fslc:"
 
