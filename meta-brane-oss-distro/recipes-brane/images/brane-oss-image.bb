@@ -35,5 +35,6 @@ IMAGE_INSTALL += "\
    libgpg-error \
    libogg \
    libvorbis \
+   sbc \
    e2fsprogs \
    "
